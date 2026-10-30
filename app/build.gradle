@@ -10,8 +10,18 @@ android {
         applicationId 'it.tony.litelauncher'
         minSdk 24
         targetSdk 34
-        versionCode 1
-        versionName '1.0'
+        versionCode 2
+        versionName '2.0'
+    }
+
+    signingConfigs {
+        // Chiave fissa: ogni compilazione ha la stessa firma, quindi gli aggiornamenti si installano sopra
+        fixed {
+            storeFile file('release.keystore')
+            storePassword 'litelauncher'
+            keyAlias 'litelauncher'
+            keyPassword 'litelauncher'
+        }
     }
 
     buildTypes {
@@ -19,8 +29,7 @@ android {
             minifyEnabled true
             shrinkResources true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
-            // Firmato con la chiave di debug: va bene per installarlo via ADB sul proprio TV
-            signingConfig signingConfigs.debug
+            signingConfig signingConfigs.fixed
         }
     }
 
