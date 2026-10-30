@@ -543,15 +543,16 @@ public class MainActivity extends Activity {
         head.addView(hint);
 
         int cols = 5;
-        int gap = dp(16);
-        int inner = panelWidth() - dp(52) - dp(20);
+        int gap = dp(18);
+        int margin = dp(20); // spazio attorno alla griglia: l'app ingrandita non tocca mai il bordo
+        int inner = panelWidth() - dp(52) - margin * 2;
         int tileW = (inner - gap * (cols - 1)) / cols;
         int tileH = tileW * 9 / 16;
 
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
         grid.setClipChildren(false);
-        grid.setPadding(dp(10), dp(12), dp(10), dp(12));
+        grid.setPadding(margin, margin, margin, margin);
 
         int total = list.size() + 1; // + riquadro "Aggiungi"
         LinearLayout row = null;
@@ -574,9 +575,11 @@ public class MainActivity extends Activity {
         scroll.setClipChildren(false);
         scroll.setClipToPadding(false);
         scroll.setVerticalScrollBarEnabled(false);
+        scroll.setVerticalFadingEdgeEnabled(false);
+        scroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
         scroll.addView(grid);
         int rows = (total + cols - 1) / cols;
-        int gridH = rows * tileH + (rows - 1) * gap + dp(24);
+        int gridH = rows * tileH + (rows - 1) * gap + margin * 2;
         int maxH = (int) (getResources().getDisplayMetrics().heightPixels * 0.62f);
         LinearLayout.LayoutParams slp = new LinearLayout.LayoutParams(-1, Math.min(gridH, maxH));
         slp.topMargin = dp(10);
@@ -586,6 +589,7 @@ public class MainActivity extends Activity {
     private View appTile(final AppItem a, int[] c) {
         FrameLayout tile = new FrameLayout(this);
         style3d(tile, c, dp(10), false);
+        tile.setClipToOutline(true);
         tile.setTag(a.pkg);
         tile.setContentDescription(a.label);
 
@@ -697,8 +701,8 @@ public class MainActivity extends Activity {
             sla.addState(new int[]{android.R.attr.state_pressed}, lift(0.97f, 0, 0));
             sla.addState(new int[]{android.R.attr.state_focused}, lift(1.05f, 0, 0));
         } else {
-            sla.addState(new int[]{android.R.attr.state_pressed}, lift(1.06f, 0, dp(6)));
-            sla.addState(new int[]{android.R.attr.state_focused}, lift(1.14f, 0, dp(10)));
+            sla.addState(new int[]{android.R.attr.state_pressed}, lift(1.05f, 0, dp(6)));
+            sla.addState(new int[]{android.R.attr.state_focused}, lift(1.12f, 0, dp(10)));
         }
         sla.addState(new int[0], lift(1f, 0, 0));
         v.setStateListAnimator(sla);
