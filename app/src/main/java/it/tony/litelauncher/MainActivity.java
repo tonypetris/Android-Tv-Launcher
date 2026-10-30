@@ -14,7 +14,12 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.LinearGradient;
+import android.graphics.Paint;
+import android.graphics.RadialGradient;
+import android.graphics.Shader;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
@@ -69,12 +74,13 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /**
- * Lite Launcher: cartelle 3D con apertura a zoom, pulsante TV e meteo locale (Open-Meteo).
+ * Lite Launcher: cartelle piatte con apertura a zoom, pulsante TV e meteo locale (Open-Meteo).
  * Interfaccia costruita interamente in codice, nessuna libreria esterna.
  */
 public class MainActivity extends Activity {
@@ -161,6 +167,7 @@ public class MainActivity extends Activity {
     private final List<Folder> folders = new ArrayList<>();
     private Map<String, AppItem> apps = new HashMap<>();
 
+    private SkyView sky;
     private LinearLayout content;
     private LinearLayout foldersBox;
     private TextView greeting;
@@ -190,6 +197,7 @@ public class MainActivity extends Activity {
         @Override
         public void run() {
             updateGreeting();
+            if (sky != null) sky.invalidate();
             refreshWeather(false);
             handler.postDelayed(this, 60_000);
         }
@@ -276,6 +284,9 @@ public class MainActivity extends Activity {
     private void buildUi() {
         FrameLayout root = new FrameLayout(this);
         root.setBackgroundColor(0xFF10131A);
+        sky = new SkyView(this);
+        sky.setSun(prefs.getInt("sr", 7 * 60), prefs.getInt("ss", 18 * 60));
+        root.addView(sky, new FrameLayout.LayoutParams(-1, -1));
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -295,7 +306,8 @@ public class MainActivity extends Activity {
         left.setOrientation(LinearLayout.VERTICAL);
         header.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
 
-        greeting = text(15, 0xFF8A93A3);
+        greeting = text(15, 0xDDFFFFFF);
+        shadow(greeting);
         left.addView(greeting);
 
         LinearLayout clockRow = new LinearLayout(this);
@@ -310,12 +322,14 @@ public class MainActivity extends Activity {
         time.setTextSize(TypedValue.COMPLEX_UNIT_SP, 46);
         time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
         time.setIncludeFontPadding(false);
+        shadow(time);
         clockRow.addView(time);
 
         TextClock date = new TextClock(this);
         date.setFormat24Hour("EEEE d MMMM");
         date.setFormat12Hour("EEEE d MMMM");
-        date.setTextColor(0xFF8A93A3);
+        date.setTextColor(0xDDFFFFFF);
+        shadow(date);
         date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
         dlp.leftMargin = dp(16);
@@ -353,7 +367,7 @@ public class MainActivity extends Activity {
         panel.setClickable(true);
         panel.setClipChildren(false);
         GradientDrawable pbg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xFF222835, 0xFF191E28});
+                new int[]{0xF2222835, 0xF2191E28});
         pbg.setCornerRadius(dp(18));
         pbg.setStroke(dp(1), 0x1FFFFFFF);
         panel.setBackground(pbg);
@@ -373,7 +387,7 @@ public class MainActivity extends Activity {
         LinearLayout card = new LinearLayout(this);
         card.setOrientation(LinearLayout.HORIZONTAL);
         card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(22), dp(14), dp(26), dp(14) + dp(5));
+        card.setPadding(dp(22), dp(14), dp(26), dp(14));
         style3d(card, DARK, dp(14));
         card.setOnClickListener(v -> {
             play(sClick);
@@ -468,7 +482,7 @@ public class MainActivity extends Activity {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.HORIZONTAL);
         tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(22), 0, dp(16), dp(5));
+        tile.setPadding(dp(22), 0, dp(16), 0);
         style3d(tile, c, dp(14));
         tile.setTag(idx);
 
@@ -532,7 +546,7 @@ public class MainActivity extends Activity {
         int gap = dp(16);
         int inner = panelWidth() - dp(52) - dp(20);
         int tileW = (inner - gap * (cols - 1)) / cols;
-        int tileH = tileW * 9 / 16 + dp(5);
+        int tileH = tileW * 9 / 16;
 
         LinearLayout grid = new LinearLayout(this);
         grid.setOrientation(LinearLayout.VERTICAL);
@@ -588,9 +602,7 @@ public class MainActivity extends Activity {
 
         if (a.banner) {
             img.setScaleType(ImageView.ScaleType.CENTER_CROP);
-            FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(-1, -1);
-            ilp.bottomMargin = dp(5);
-            tile.addView(img, ilp);
+            tile.addView(img, new FrameLayout.LayoutParams(-1, -1));
         } else {
             img.setScaleType(ImageView.ScaleType.FIT_CENTER);
             FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(44), dp(44),
@@ -619,7 +631,6 @@ public class MainActivity extends Activity {
         TextView t = text(15, 0xFFD3D1C7);
         t.setText("＋  Aggiungi");
         t.setGravity(Gravity.CENTER);
-        t.setPadding(0, 0, 0, dp(5));
         style3d(t, GREY, dp(10));
         t.setTag("add");
         t.setOnClickListener(v -> {
@@ -634,7 +645,7 @@ public class MainActivity extends Activity {
         t.setText(label);
         t.setGravity(Gravity.CENTER);
         t.setMinWidth(dp(48));
-        t.setPadding(dp(18), dp(9), dp(18), dp(9) + dp(4));
+        t.setPadding(dp(18), dp(9), dp(18), dp(9));
         style3d(t, GREY, dp(24));
         t.setOnClickListener(v -> {
             if (!"⚙️".equals(label)) play(sClick);
@@ -649,20 +660,13 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ stile 3D
 
-    /** Rilievo: faccia con sfumatura + bordo inferiore scuro, ombra, sollevamento al focus, affondamento alla pressione. */
+    /** Stile piatto: tinta unita, bordo bianco e leggero ingrandimento al focus. */
     private void style3d(View v, int[] c, final float radius) {
-        GradientDrawable edge = new GradientDrawable();
-        edge.setColor(c[2]);
-        edge.setCornerRadius(radius);
-
-        GradientDrawable face = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{c[0], c[1]});
+        GradientDrawable face = new GradientDrawable();
+        face.setColor((c[0] & 0x00FFFFFF) | 0xB8000000); // semitrasparente: il cielo si intravede
+        face.setStroke(dp(1), 0x40FFFFFF);
         face.setCornerRadius(radius);
-        face.setStroke(dp(1), 0x2EFFFFFF);
-
-        LayerDrawable bg = new LayerDrawable(new Drawable[]{edge, face});
-        bg.setLayerInset(1, 0, 0, 0, dp(5));
-        v.setBackground(bg);
+        v.setBackground(face);
 
         GradientDrawable ring = new GradientDrawable();
         ring.setColor(Color.TRANSPARENT);
@@ -679,11 +683,11 @@ public class MainActivity extends Activity {
                 outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
             }
         });
-        v.setElevation(dp(6));
+        v.setElevation(0);
 
         StateListAnimator sla = new StateListAnimator();
-        sla.addState(new int[]{android.R.attr.state_pressed}, lift(1.02f, dp(3), 0));
-        sla.addState(new int[]{android.R.attr.state_focused}, lift(1.06f, -dp(5), dp(12)));
+        sla.addState(new int[]{android.R.attr.state_pressed}, lift(0.97f, 0, 0));
+        sla.addState(new int[]{android.R.attr.state_focused}, lift(1.05f, 0, 0));
         sla.addState(new int[0], lift(1f, 0, 0));
         v.setStateListAnimator(sla);
 
@@ -1180,7 +1184,7 @@ public class MainActivity extends Activity {
             try {
                 String url = "https://api.open-meteo.com/v1/forecast?latitude=" + lat + "&longitude=" + lon
                         + "&current=temperature_2m,weather_code"
-                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min"
+                        + "&daily=weather_code,temperature_2m_max,temperature_2m_min,sunrise,sunset"
                         + "&timezone=auto&forecast_days=5";
                 final JSONObject j = new JSONObject(httpGet(url));
                 runOnUiThread(() -> showWeather(j, city));
@@ -1207,6 +1211,13 @@ public class MainActivity extends Activity {
             JSONArray wc = d.getJSONArray("weather_code");
             JSONArray mx = d.getJSONArray("temperature_2m_max");
             JSONArray mn = d.getJSONArray("temperature_2m_min");
+            try {
+                int sr = hm(d.getJSONArray("sunrise").getString(0));
+                int ss = hm(d.getJSONArray("sunset").getString(0));
+                prefs.edit().putInt("sr", sr).putInt("ss", ss).apply();
+                sky.setSun(sr, ss);
+            } catch (Exception ignored) {
+            }
             wSub.setText(city + " · max " + Math.round(mx.getDouble(0)) + "°  min " + Math.round(mn.getDouble(0)) + "°");
 
             wForecast.removeAllViews();
@@ -1370,6 +1381,150 @@ public class MainActivity extends Activity {
                 askCity();
             }
         }).show();
+    }
+
+    /** "2026-10-30T06:41" -> minuti dalla mezzanotte */
+    private static int hm(String iso) {
+        int t = iso.indexOf('T');
+        return Integer.parseInt(iso.substring(t + 1, t + 3)) * 60 + Integer.parseInt(iso.substring(t + 4, t + 6));
+    }
+
+    private void shadow(TextView t) {
+        t.setShadowLayer(dp(6), 0, dp(1), 0x99000000);
+    }
+
+    // ------------------------------------------------------------------ cielo che cambia con l'ora
+
+    /** Sfondo: cielo con colori della giornata, sole che percorre un arco, luna e stelle di notte. */
+    static final class SkyView extends View {
+        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final float[] stars = new float[110 * 4];
+        private int srMin = 7 * 60;
+        private int ssMin = 18 * 60;
+
+        SkyView(Context c) {
+            super(c);
+            Random r = new Random(7);
+            for (int i = 0; i < stars.length; i += 4) {
+                stars[i] = r.nextFloat();
+                stars[i + 1] = r.nextFloat() * 0.75f;
+                stars[i + 2] = 0.6f + r.nextFloat() * 1.4f;
+                stars[i + 3] = 0.3f + r.nextFloat() * 0.7f;
+            }
+        }
+
+        void setSun(int sunrise, int sunset) {
+            if (sunrise > 120 && sunset > sunrise + 120 && sunset < 23 * 60) {
+                srMin = sunrise;
+                ssMin = sunset;
+            }
+            invalidate();
+        }
+
+        private float dp(float v) {
+            return v * getResources().getDisplayMetrics().density;
+        }
+
+        @Override
+        protected void onDraw(Canvas canvas) {
+            int w = getWidth(), h = getHeight();
+            if (w == 0 || h == 0) return;
+            Calendar cal = Calendar.getInstance();
+            float m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+            int sr = srMin, ss = ssMin, noon = (sr + ss) / 2;
+
+            // {minuto, colore alto, colore basso}
+            int[][] f = {
+                    {0, 0xFF050916, 0xFF0B1230},
+                    {sr - 90, 0xFF070B1E, 0xFF161636},
+                    {sr - 25, 0xFF1C2452, 0xFF8A4A68},
+                    {sr + 25, 0xFF33548E, 0xFFF2A26C},
+                    {sr + 120, 0xFF3A74BC, 0xFFA6D0EE},
+                    {noon, 0xFF2766C0, 0xFF8CC4F2},
+                    {ss - 120, 0xFF2C62AA, 0xFF9EC2E0},
+                    {ss - 20, 0xFF3A3C82, 0xFFF4864C},
+                    {ss + 30, 0xFF201E4E, 0xFF8C3C5C},
+                    {ss + 100, 0xFF0A0E26, 0xFF1A1838},
+                    {24 * 60, 0xFF050916, 0xFF0B1230}};
+            int k = 0;
+            while (k < f.length - 2 && m >= f[k + 1][0]) k++;
+            float span = Math.max(1, f[k + 1][0] - f[k][0]);
+            float t = clamp((m - f[k][0]) / span);
+            int top = lerp(f[k][1], f[k + 1][1], t);
+            int bottom = lerp(f[k][2], f[k + 1][2], t);
+            paint.setShader(new LinearGradient(0, 0, 0, h, top, bottom, Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, paint);
+            paint.setShader(null);
+
+            // notte: 1 di notte, 0 di giorno, sfumato all'alba e al tramonto
+            float night;
+            if (m < sr - 90 || m > ss + 90) night = 1f;
+            else if (m < sr - 20) night = (sr - 20 - m) / 70f;
+            else if (m > ss + 20) night = (m - ss - 20) / 70f;
+            else night = 0f;
+            night = clamp(night);
+
+            // stelle
+            if (night > 0) {
+                paint.setColor(Color.WHITE);
+                for (int i = 0; i < stars.length; i += 4) {
+                    paint.setAlpha((int) (255 * night * stars[i + 3]));
+                    canvas.drawCircle(stars[i] * w, stars[i + 1] * h, dp(stars[i + 2]), paint);
+                }
+                paint.setAlpha(255);
+            }
+
+            float horizon = h * 0.95f;
+
+            // sole
+            if (m > sr - 25 && m < ss + 25) {
+                float p = (m - sr) / (float) (ss - sr);
+                float elev = (float) Math.sin(Math.PI * clamp(p));
+                float x = w * (0.06f + 0.88f * clamp(p));
+                float y = horizon - elev * h * 0.80f;
+                float a = clamp(Math.min((m - (sr - 25)) / 50f, ((ss + 25) - m) / 50f));
+                int col = lerp(0xFFFF8A40, 0xFFFFF3C8, clamp(elev * 1.8f));
+                float glowR = dp(260) * (1.2f - elev * 0.4f);
+                paint.setShader(new RadialGradient(x, y, glowR,
+                        new int[]{withAlpha(col, (int) (150 * a)), withAlpha(col, (int) (50 * a)), withAlpha(col, 0)},
+                        new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
+                canvas.drawCircle(x, y, glowR, paint);
+                paint.setShader(null);
+                paint.setColor(withAlpha(col, (int) (255 * a)));
+                canvas.drawCircle(x, y, dp(48), paint);
+            }
+
+            // luna
+            if (night > 0) {
+                float start = ss + 30, end = sr - 30 + 24 * 60;
+                float mm = m < sr ? m + 24 * 60 : m;
+                float p = clamp((mm - start) / (end - start));
+                float elev = (float) Math.sin(Math.PI * p);
+                float x = w * (0.08f + 0.84f * p);
+                float y = horizon - elev * h * 0.70f;
+                paint.setShader(new RadialGradient(x, y, dp(150),
+                        new int[]{withAlpha(0xFFDCE4FF, (int) (70 * night)), withAlpha(0xFFDCE4FF, 0)},
+                        null, Shader.TileMode.CLAMP));
+                canvas.drawCircle(x, y, dp(150), paint);
+                paint.setShader(null);
+                paint.setColor(withAlpha(0xFFE9EDF7, (int) (255 * night)));
+                canvas.drawCircle(x, y, dp(32), paint);
+            }
+        }
+
+        private static float clamp(float v) {
+            return v < 0 ? 0 : (v > 1 ? 1 : v);
+        }
+
+        private static int withAlpha(int c, int a) {
+            return (Math.max(0, Math.min(255, a)) << 24) | (c & 0x00FFFFFF);
+        }
+
+        private static int lerp(int a, int b, float t) {
+            int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
+            int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
+            return 0xFF000000 | ((int) (ar + (br - ar) * t) << 16) | ((int) (ag + (bg - ag) * t) << 8) | (int) (ab + (bb - ab) * t);
+        }
     }
 
     // ------------------------------------------------------------------ utilità
