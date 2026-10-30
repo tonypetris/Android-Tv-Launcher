@@ -14,17 +14,22 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.graphics.Bitmap;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.RadialGradient;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.graphics.Shader;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
 import android.graphics.Outline;
 import android.graphics.Typeface;
+import android.graphics.drawable.BitmapDrawable;
 import android.graphics.drawable.ColorDrawable;
 import android.graphics.drawable.Drawable;
 import android.graphics.drawable.GradientDrawable;
@@ -565,7 +570,7 @@ public class MainActivity extends Activity {
                 if (i > 0) rlp.topMargin = gap;
                 grid.addView(row, rlp);
             }
-            View tile = i < list.size() ? appTile(list.get(i), c) : addTile();
+            View tile = i < list.size() ? appTile(list.get(i), c, tileW, tileH) : addTile();
             LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(tileW, tileH);
             if (i % cols > 0) tlp.leftMargin = gap;
             row.addView(tile, tlp);
@@ -586,28 +591,21 @@ public class MainActivity extends Activity {
         panel.addView(scroll, slp);
     }
 
-    private View appTile(final AppItem a, int[] c) {
+    private View appTile(final AppItem a, int[] c, int w, int h) {
         FrameLayout tile = new FrameLayout(this);
         style3d(tile, c, dp(10), false);
-        tile.setClipToOutline(true);
         tile.setTag(a.pkg);
         tile.setContentDescription(a.label);
 
         ImageView img = new ImageView(this);
-        img.setImageDrawable(a.image);
-        final int r = dp(10);
-        img.setOutlineProvider(new ViewOutlineProvider() {
-            @Override
-            public void getOutline(View view, Outline outline) {
-                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), r);
-            }
-        });
-        img.setClipToOutline(true);
-
         if (a.banner) {
-            img.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            // Banner già arrotondato nell'immagine: gli angoli restano perfetti anche durante l'effetto pop
+            tile.setBackground(null);
+            img.setImageDrawable(roundedBanner(a.image, w, h, dp(10)));
+            img.setScaleType(ImageView.ScaleType.FIT_XY);
             tile.addView(img, new FrameLayout.LayoutParams(-1, -1));
         } else {
+            img.setImageDrawable(a.image);
             img.setScaleType(ImageView.ScaleType.FIT_CENTER);
             FrameLayout.LayoutParams ilp = new FrameLayout.LayoutParams(dp(44), dp(44),
                     Gravity.CENTER_HORIZONTAL | Gravity.TOP);
@@ -629,6 +627,36 @@ public class MainActivity extends Activity {
             return true;
         });
         return tile;
+    }
+
+    /** Disegna il banner (ritaglio centrale) in una bitmap con angoli arrotondati. */
+    private Drawable roundedBanner(Drawable src, int w, int h, float r) {
+        if (w <= 0 || h <= 0) return src;
+        try {
+            Bitmap raw = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Canvas c = new Canvas(raw);
+            Rect old = new Rect(src.getBounds());
+            int iw = src.getIntrinsicWidth(), ih = src.getIntrinsicHeight();
+            if (iw > 0 && ih > 0) {
+                float sc = Math.max(w / (float) iw, h / (float) ih);
+                int dw = Math.round(iw * sc), dh = Math.round(ih * sc);
+                int l = (w - dw) / 2, t = (h - dh) / 2;
+                src.setBounds(l, t, l + dw, t + dh);
+            } else {
+                src.setBounds(0, 0, w, h);
+            }
+            src.draw(c);
+            src.setBounds(old);
+
+            Bitmap out = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            Paint p = new Paint(Paint.ANTI_ALIAS_FLAG | Paint.FILTER_BITMAP_FLAG);
+            p.setShader(new BitmapShader(raw, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP));
+            new Canvas(out).drawRoundRect(new RectF(0, 0, w, h), r, r, p);
+            raw.recycle();
+            return new BitmapDrawable(getResources(), out);
+        } catch (Throwable e) {
+            return src;
+        }
     }
 
     private View addTile() {
