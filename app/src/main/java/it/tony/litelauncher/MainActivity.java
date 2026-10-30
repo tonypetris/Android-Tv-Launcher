@@ -336,6 +336,7 @@ public class MainActivity extends Activity {
         date.setTextColor(0xDDFFFFFF);
         shadow(date);
         date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
+        date.setSingleLine(true);
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
         dlp.leftMargin = dp(16);
         dlp.bottomMargin = dp(6);
@@ -343,6 +344,8 @@ public class MainActivity extends Activity {
 
         header.addView(pill("📺  TV", v -> launchTv()));
         header.addView(pill("☰  App", v -> showAllApps()));
+        header.addView(pill("Spegni", new GlyphDrawable(false, dp(20)), v -> powerOff()));
+        header.addView(pill("Riavvia", new GlyphDrawable(true, dp(20)), v -> restart()));
         header.addView(pill("⚙️", v -> showLauncherMenu()));
 
         // --- cartelle
@@ -371,6 +374,7 @@ public class MainActivity extends Activity {
         panel.setOrientation(LinearLayout.VERTICAL);
         panel.setClickable(true);
         panel.setClipChildren(false);
+        panel.setClipToPadding(false);
         GradientDrawable pbg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
                 new int[]{0xF2222835, 0xF2191E28});
         pbg.setCornerRadius(dp(18));
@@ -558,6 +562,7 @@ public class MainActivity extends Activity {
         grid.setOrientation(LinearLayout.VERTICAL);
         grid.setClipChildren(false);
         grid.setPadding(margin, margin, margin, margin);
+        grid.setClipToPadding(false); // senza questo Android taglia l'app ingrandita (angoli squadrati)
 
         int total = list.size() + 1; // + riquadro "Aggiungi"
         LinearLayout row = null;
@@ -673,18 +678,27 @@ public class MainActivity extends Activity {
     }
 
     private View pill(final String label, final View.OnClickListener click) {
+        return pill(label, null, click);
+    }
+
+    private View pill(final String label, Drawable icon, final View.OnClickListener click) {
         TextView t = text(16, Color.WHITE);
         t.setText(label);
+        if (icon != null) {
+            icon.setBounds(0, 0, icon.getIntrinsicWidth(), icon.getIntrinsicHeight());
+            t.setCompoundDrawablesRelative(icon, null, null, null);
+            t.setCompoundDrawablePadding(dp(8));
+        }
         t.setGravity(Gravity.CENTER);
         t.setMinWidth(dp(48));
-        t.setPadding(dp(18), dp(9), dp(18), dp(9));
+        t.setPadding(dp(16), dp(9), dp(16), dp(9));
         style3d(t, GREY, dp(24));
         t.setOnClickListener(v -> {
             if (!"⚙️".equals(label)) play(sClick);
             click.onClick(v);
         });
         LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
-        lp.leftMargin = dp(14);
+        lp.leftMargin = dp(12);
         lp.bottomMargin = dp(8);
         t.setLayoutParams(lp);
         return t;
@@ -1568,6 +1582,108 @@ public class MainActivity extends Activity {
             int ar = (a >> 16) & 0xFF, ag = (a >> 8) & 0xFF, ab = a & 0xFF;
             int br = (b >> 16) & 0xFF, bg = (b >> 8) & 0xFF, bb = b & 0xFF;
             return 0xFF000000 | ((int) (ar + (br - ar) * t) << 16) | ((int) (ag + (bg - ag) * t) << 8) | (int) (ab + (bb - ab) * t);
+        }
+    }
+
+    // ------------------------------------------------------------------ spegni / riavvia
+
+    private void powerOff() {
+        PowerService ps = PowerService.instance;
+        if (ps == null) {
+            explainPowerService();
+            return;
+        }
+        if (!ps.standby()) toast("Il TV non ha accettato il comando di spegnimento");
+    }
+
+    private void restart() {
+        final PowerService ps = PowerService.instance;
+        if (ps == null) {
+            explainPowerService();
+            return;
+        }
+        dialog().setTitle("Riavviare il TV?")
+                .setPositiveButton("Riavvia", (d, w) -> {
+                    if (!ps.reboot()) toast("Il TV non ha accettato il comando di riavvio");
+                })
+                .setNegativeButton("Annulla", null)
+                .show();
+    }
+
+    private void explainPowerService() {
+        dialog().setTitle("Attiva Spegni e Riavvia")
+                .setMessage("Android permette di spegnere o riavviare il TV solo tramite un servizio di accessibilità.\n\n"
+                        + "Attivalo una volta: Impostazioni → Accessibilità → \"Lite Launcher – Spegni e riavvia\" → Attiva.\n\n"
+                        + "Oppure da PC con ADB:\n"
+                        + "adb shell settings put secure enabled_accessibility_services it.tony.litelauncher/.PowerService\n"
+                        + "adb shell settings put secure accessibility_enabled 1")
+                .setPositiveButton("Apri Accessibilità", (d, w) -> safeStart(
+                        new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)))
+                .setNegativeButton("Chiudi", null)
+                .show();
+    }
+
+    /** Icone disegnate in codice: simbolo di accensione e freccia circolare di riavvio. */
+    static final class GlyphDrawable extends Drawable {
+        private final boolean restart;
+        private final int size;
+        private final Paint p = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        GlyphDrawable(boolean restart, int size) {
+            this.restart = restart;
+            this.size = size;
+            p.setColor(Color.WHITE);
+            p.setStyle(Paint.Style.STROKE);
+            p.setStrokeCap(Paint.Cap.ROUND);
+            p.setStrokeWidth(size * 0.11f);
+        }
+
+        @Override
+        public void draw(Canvas c) {
+            Rect b = getBounds();
+            float cx = b.exactCenterX(), cy = b.exactCenterY(), r = b.width() * 0.36f;
+            RectF oval = new RectF(cx - r, cy - r, cx + r, cy + r);
+            if (!restart) {
+                c.drawArc(oval, -55, 290, false, p);
+                c.drawLine(cx, cy - r * 1.2f, cx, cy - r * 0.15f, p);
+            } else {
+                float start = -40, sweep = 290;
+                c.drawArc(oval, start, sweep, false, p);
+                double th = Math.toRadians(start + sweep);
+                float ex = cx + r * (float) Math.cos(th), ey = cy + r * (float) Math.sin(th);
+                double dx = -Math.sin(th), dy = Math.cos(th); // direzione di avanzamento
+                float L = r * 0.62f;
+                for (int sgn = -1; sgn <= 1; sgn += 2) {
+                    double a = Math.toRadians(35 * sgn);
+                    double wx = dx * Math.cos(a) - dy * Math.sin(a), wy = dx * Math.sin(a) + dy * Math.cos(a);
+                    c.drawLine(ex, ey, ex - L * (float) wx, ey - L * (float) wy, p);
+                }
+            }
+        }
+
+        @Override
+        public int getIntrinsicWidth() {
+            return size;
+        }
+
+        @Override
+        public int getIntrinsicHeight() {
+            return size;
+        }
+
+        @Override
+        public void setAlpha(int alpha) {
+            p.setAlpha(alpha);
+        }
+
+        @Override
+        public void setColorFilter(android.graphics.ColorFilter cf) {
+            p.setColorFilter(cf);
+        }
+
+        @Override
+        public int getOpacity() {
+            return android.graphics.PixelFormat.TRANSLUCENT;
         }
     }
 

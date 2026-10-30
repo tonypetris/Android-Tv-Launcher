@@ -3,4 +3,6 @@
     <string name="app_name">Lite Launcher</string>
     <string name="settings">Impostazioni</string>
     <string name="hidden_apps">App nascoste</string>
+    <string name="power_service_label">Lite Launcher – Spegni e riavvia</string>
+    <string name="power_service_desc">Permette ai tasti Spegni e Riavvia di Lite Launcher di mettere il TV in standby o riavviarlo. Non legge né raccoglie dati.</string>
 </resources>
