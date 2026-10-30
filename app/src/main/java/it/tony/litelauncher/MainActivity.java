@@ -585,7 +585,7 @@ public class MainActivity extends Activity {
 
     private View appTile(final AppItem a, int[] c) {
         FrameLayout tile = new FrameLayout(this);
-        style3d(tile, c, dp(10));
+        style3d(tile, c, dp(10), false);
         tile.setTag(a.pkg);
         tile.setContentDescription(a.label);
 
@@ -631,7 +631,7 @@ public class MainActivity extends Activity {
         TextView t = text(15, 0xFFD3D1C7);
         t.setText("＋  Aggiungi");
         t.setGravity(Gravity.CENTER);
-        style3d(t, GREY, dp(10));
+        style3d(t, GREY, dp(10), false);
         t.setTag("add");
         t.setOnClickListener(v -> {
             play(sClick);
@@ -662,20 +662,27 @@ public class MainActivity extends Activity {
 
     /** Stile piatto: tinta unita, bordo bianco e leggero ingrandimento al focus. */
     private void style3d(View v, int[] c, final float radius) {
+        style3d(v, c, radius, true);
+    }
+
+    /** ring = false: niente bordo bianco, solo ingrandimento "pop" (usato per le app dentro le cartelle). */
+    private void style3d(View v, int[] c, final float radius, boolean ring) {
         GradientDrawable face = new GradientDrawable();
         face.setColor((c[0] & 0x00FFFFFF) | 0xB8000000); // semitrasparente: il cielo si intravede
         face.setStroke(dp(1), 0x40FFFFFF);
         face.setCornerRadius(radius);
         v.setBackground(face);
 
-        GradientDrawable ring = new GradientDrawable();
-        ring.setColor(Color.TRANSPARENT);
-        ring.setStroke(dp(3), Color.WHITE);
-        ring.setCornerRadius(radius);
-        StateListDrawable fg = new StateListDrawable();
-        fg.addState(new int[]{android.R.attr.state_focused}, ring);
-        fg.addState(new int[0], new ColorDrawable(Color.TRANSPARENT));
-        v.setForeground(fg);
+        GradientDrawable border = new GradientDrawable();
+        border.setColor(Color.TRANSPARENT);
+        border.setStroke(dp(3), Color.WHITE);
+        border.setCornerRadius(radius);
+        if (ring) {
+            StateListDrawable fg = new StateListDrawable();
+            fg.addState(new int[]{android.R.attr.state_focused}, border);
+            fg.addState(new int[0], new ColorDrawable(Color.TRANSPARENT));
+            v.setForeground(fg);
+        }
 
         v.setOutlineProvider(new ViewOutlineProvider() {
             @Override
@@ -686,8 +693,13 @@ public class MainActivity extends Activity {
         v.setElevation(0);
 
         StateListAnimator sla = new StateListAnimator();
-        sla.addState(new int[]{android.R.attr.state_pressed}, lift(0.97f, 0, 0));
-        sla.addState(new int[]{android.R.attr.state_focused}, lift(1.05f, 0, 0));
+        if (ring) {
+            sla.addState(new int[]{android.R.attr.state_pressed}, lift(0.97f, 0, 0));
+            sla.addState(new int[]{android.R.attr.state_focused}, lift(1.05f, 0, 0));
+        } else {
+            sla.addState(new int[]{android.R.attr.state_pressed}, lift(1.06f, 0, dp(6)));
+            sla.addState(new int[]{android.R.attr.state_focused}, lift(1.14f, 0, dp(10)));
+        }
         sla.addState(new int[0], lift(1f, 0, 0));
         v.setStateListAnimator(sla);
 
