@@ -179,8 +179,10 @@ public class MainActivity extends Activity {
     private FrameLayout overlay;
     private LinearLayout panel;
 
-    private TextView wIcon, wTemp, wDesc, wSub;
-    private LinearLayout wForecast;
+    private TextView weatherLine;
+    private TextView favLabel;
+    private LinearLayout favBox;
+    private final List<String> favs = new ArrayList<>();
     private long lastWeather = 0;
 
     private AudioTrack sTick, sClick, sOpen, sClose;
@@ -216,6 +218,7 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
         soundOn = prefs.getBoolean("sound", true);
         loadFolders();
+        loadFavs();
         buildUi();
         initSounds();
 
@@ -295,15 +298,15 @@ public class MainActivity extends Activity {
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
-        content.setPadding(dp(56), dp(30), dp(56), dp(28));
+        content.setPadding(dp(56), dp(30), dp(56), dp(26));
         content.setClipChildren(false);
         content.setClipToPadding(false);
         root.addView(content, new FrameLayout.LayoutParams(-1, -1));
 
-        // --- intestazione
+        // --- intestazione: data + meteo, orologio gigante, icone rotonde
         LinearLayout header = new LinearLayout(this);
         header.setOrientation(LinearLayout.HORIZONTAL);
-        header.setGravity(Gravity.BOTTOM);
+        header.setGravity(Gravity.TOP);
         header.setClipChildren(false);
         content.addView(header, new LinearLayout.LayoutParams(-1, -2));
 
@@ -311,60 +314,85 @@ public class MainActivity extends Activity {
         left.setOrientation(LinearLayout.VERTICAL);
         header.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
 
-        greeting = text(15, 0xDDFFFFFF);
-        shadow(greeting);
-        left.addView(greeting);
+        LinearLayout dateRow = new LinearLayout(this);
+        dateRow.setOrientation(LinearLayout.HORIZONTAL);
+        dateRow.setGravity(Gravity.CENTER_VERTICAL);
+        LinearLayout.LayoutParams drp = new LinearLayout.LayoutParams(-2, -2);
+        drp.leftMargin = dp(6);
+        left.addView(dateRow, drp);
 
-        LinearLayout clockRow = new LinearLayout(this);
-        clockRow.setOrientation(LinearLayout.HORIZONTAL);
-        clockRow.setGravity(Gravity.BOTTOM);
-        left.addView(clockRow);
+        TextClock date = new TextClock(this);
+        date.setFormat24Hour("EEEE d MMMM");
+        date.setFormat12Hour("EEEE d MMMM");
+        date.setTextColor(0xF2FFFFFF);
+        date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 18);
+        date.setSingleLine(true);
+        shadow(date);
+        dateRow.addView(date);
+
+        weatherLine = text(18, 0xF2FFFFFF);
+        weatherLine.setSingleLine(true);
+        shadow(weatherLine);
+        weatherLine.setText(prefs.contains("w_lat") ? "" : "  ·  imposta il meteo dal menu ⚙️");
+        dateRow.addView(weatherLine);
 
         TextClock time = new TextClock(this);
         time.setFormat24Hour("HH:mm");
         time.setFormat12Hour("HH:mm");
         time.setTextColor(Color.WHITE);
-        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, 46);
-        time.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
+        time.setTextSize(TypedValue.COMPLEX_UNIT_SP, 150);
+        time.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
         time.setIncludeFontPadding(false);
-        shadow(time);
-        clockRow.addView(time);
+        time.setLetterSpacing(-0.02f);
+        // effetto vetro: sfumatura dal bianco pieno al bianco trasparente
+        time.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int hgt = b - t;
+            if (hgt > 0) {
+                ((TextView) v).getPaint().setShader(new LinearGradient(0, 0, 0, hgt,
+                        0xF5FFFFFF, 0x66FFFFFF, Shader.TileMode.CLAMP));
+                v.invalidate();
+            }
+        });
+        left.addView(time, new LinearLayout.LayoutParams(-2, -2));
 
-        TextClock date = new TextClock(this);
-        date.setFormat24Hour("EEEE d MMMM");
-        date.setFormat12Hour("EEEE d MMMM");
-        date.setTextColor(0xDDFFFFFF);
-        shadow(date);
-        date.setTextSize(TypedValue.COMPLEX_UNIT_SP, 16);
-        date.setSingleLine(true);
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
-        dlp.leftMargin = dp(16);
-        dlp.bottomMargin = dp(6);
-        clockRow.addView(date, dlp);
+        LinearLayout icons = new LinearLayout(this);
+        icons.setOrientation(LinearLayout.HORIZONTAL);
+        icons.setClipChildren(false);
+        header.addView(icons, new LinearLayout.LayoutParams(-2, -2));
 
-        header.addView(pill("📺  TV", v -> launchTv()));
-        header.addView(pill("☰  App", v -> showAllApps()));
-        header.addView(pill("Spegni", new GlyphDrawable(false, dp(20)), v -> powerOff()));
-        header.addView(pill("Riavvia", new GlyphDrawable(true, dp(20)), v -> restart()));
-        header.addView(pill("⚙️", v -> showLauncherMenu()));
-
-        // --- cartelle
-        foldersBox = new LinearLayout(this);
-        foldersBox.setOrientation(LinearLayout.VERTICAL);
-        foldersBox.setClipChildren(false);
-        foldersBox.setClipToPadding(false);
-        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(-1, -2);
-        flp.topMargin = dp(30);
-        content.addView(foldersBox, flp);
+        icons.addView(roundBtn(iconText("📺", 20), v -> launchTv()));
+        icons.addView(roundBtn(iconText("☰", 22), v -> showAllApps()));
+        icons.addView(roundBtn(iconGlyph(false), v -> powerOff()));
+        icons.addView(roundBtn(iconGlyph(true), v -> restart()));
+        icons.addView(roundBtn(iconText("⚙️", 20), v -> showLauncherMenu()));
 
         content.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1));
 
-        // --- meteo
-        content.addView(buildWeatherCard(), new LinearLayout.LayoutParams(-1, -2));
+        // --- preferiti
+        favLabel = text(15, 0xF2FFFFFF);
+        favLabel.setText("Preferiti");
+        shadow(favLabel);
+        LinearLayout.LayoutParams flp = new LinearLayout.LayoutParams(-2, -2);
+        flp.leftMargin = dp(4);
+        flp.bottomMargin = dp(10);
+        content.addView(favLabel, flp);
+
+        favBox = new LinearLayout(this);
+        favBox.setOrientation(LinearLayout.HORIZONTAL);
+        favBox.setClipChildren(false);
+        content.addView(favBox, new LinearLayout.LayoutParams(-1, -2));
+
+        // --- dock delle cartelle
+        foldersBox = new LinearLayout(this);
+        foldersBox.setOrientation(LinearLayout.HORIZONTAL);
+        foldersBox.setClipChildren(false);
+        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, dp(74));
+        dlp.topMargin = dp(24);
+        content.addView(foldersBox, dlp);
 
         // --- sovrapposizione cartella aperta
         overlay = new FrameLayout(this);
-        overlay.setBackgroundColor(0xC806080C);
+        overlay.setBackgroundColor(0x8C06080C);
         overlay.setVisibility(View.GONE);
         overlay.setClickable(true);
         overlay.setOnClickListener(v -> closeFolder(true));
@@ -375,12 +403,11 @@ public class MainActivity extends Activity {
         panel.setClickable(true);
         panel.setClipChildren(false);
         panel.setClipToPadding(false);
-        GradientDrawable pbg = new GradientDrawable(GradientDrawable.Orientation.TOP_BOTTOM,
-                new int[]{0xF2222835, 0xF2191E28});
-        pbg.setCornerRadius(dp(18));
-        pbg.setStroke(dp(1), 0x1FFFFFFF);
+        GradientDrawable pbg = new GradientDrawable();
+        pbg.setColor(0xD91A1F2C);
+        pbg.setCornerRadius(dp(20));
+        pbg.setStroke(dp(1), 0x40FFFFFF);
         panel.setBackground(pbg);
-        panel.setElevation(dp(24));
         panel.setPadding(dp(26), dp(20), dp(26), dp(24));
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(panelWidth(), -2, Gravity.CENTER);
         overlay.addView(panel, plp);
@@ -392,55 +419,71 @@ public class MainActivity extends Activity {
         });
     }
 
-    private View buildWeatherCard() {
-        LinearLayout card = new LinearLayout(this);
-        card.setOrientation(LinearLayout.HORIZONTAL);
-        card.setGravity(Gravity.CENTER_VERTICAL);
-        card.setPadding(dp(22), dp(14), dp(26), dp(14));
-        style3d(card, DARK, dp(14));
-        card.setOnClickListener(v -> {
+    private TextView iconText(String s, float sp) {
+        TextView t = text(sp, Color.WHITE);
+        t.setText(s);
+        t.setGravity(Gravity.CENTER);
+        t.setIncludeFontPadding(false);
+        return t;
+    }
+
+    private ImageView iconGlyph(boolean restart) {
+        ImageView iv = new ImageView(this);
+        iv.setImageDrawable(new GlyphDrawable(restart, dp(22)));
+        return iv;
+    }
+
+    /** Pulsante rotondo in vetro con un'icona al centro. */
+    private View roundBtn(View inner, final View.OnClickListener click) {
+        FrameLayout b = new FrameLayout(this);
+        styleGlass(b, dp(27), 0x141824, true);
+        b.addView(inner, new FrameLayout.LayoutParams(-2, -2, Gravity.CENTER));
+        b.setOnClickListener(v -> {
             play(sClick);
-            askCity();
+            click.onClick(v);
         });
-        card.setOnLongClickListener(v -> {
-            askCity();
-            return true;
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(54), dp(54));
+        lp.leftMargin = dp(12);
+        b.setLayoutParams(lp);
+        return b;
+    }
+
+    /** Vetro: fondo semitrasparente (leggermente colorato), bordo chiaro, al focus si schiarisce e si ingrandisce. */
+    private void styleGlass(View v, final float radius, int tint, boolean pop) {
+        GradientDrawable normal = new GradientDrawable();
+        normal.setColor((tint & 0x00FFFFFF) | 0x66000000);
+        normal.setStroke(dp(1), 0x47FFFFFF);
+        normal.setCornerRadius(radius);
+        GradientDrawable focused = new GradientDrawable();
+        focused.setColor(0x4DFFFFFF);
+        focused.setStroke(dp(1), 0x8CFFFFFF);
+        focused.setCornerRadius(radius);
+        StateListDrawable bg = new StateListDrawable();
+        bg.setEnterFadeDuration(150);
+        bg.setExitFadeDuration(150);
+        bg.addState(new int[]{android.R.attr.state_focused}, focused);
+        bg.addState(new int[0], normal);
+        v.setBackground(bg);
+
+        v.setOutlineProvider(new ViewOutlineProvider() {
+            @Override
+            public void getOutline(View view, Outline outline) {
+                outline.setRoundRect(0, 0, view.getWidth(), view.getHeight(), radius);
+                outline.setAlpha(0f); // niente ombra sotto il vetro
+            }
         });
+        v.setElevation(0);
 
-        wIcon = text(36, Color.WHITE);
-        card.addView(wIcon);
+        StateListAnimator sla = new StateListAnimator();
+        sla.addState(new int[]{android.R.attr.state_pressed}, lift(pop ? 1.03f : 0.97f, 0, dp(4)));
+        sla.addState(new int[]{android.R.attr.state_focused}, lift(pop ? 1.10f : 1.05f, 0, dp(8)));
+        sla.addState(new int[0], lift(1f, 0, 0));
+        v.setStateListAnimator(sla);
 
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams clp = new LinearLayout.LayoutParams(0, -2, 1);
-        clp.leftMargin = dp(16);
-        card.addView(col, clp);
-
-        LinearLayout row = new LinearLayout(this);
-        row.setOrientation(LinearLayout.HORIZONTAL);
-        row.setGravity(Gravity.BOTTOM);
-        col.addView(row);
-        wTemp = text(30, Color.WHITE);
-        wTemp.setTypeface(Typeface.create("sans-serif-light", Typeface.NORMAL));
-        wTemp.setIncludeFontPadding(false);
-        row.addView(wTemp);
-        wDesc = text(16, 0xFFAEB5C2);
-        LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-2, -2);
-        dlp.leftMargin = dp(10);
-        row.addView(wDesc, dlp);
-
-        wSub = text(13, 0xFF8A93A3);
-        col.addView(wSub);
-
-        wForecast = new LinearLayout(this);
-        wForecast.setOrientation(LinearLayout.HORIZONTAL);
-        card.addView(wForecast);
-
-        wIcon.setText("🌤️");
-        wTemp.setText("");
-        wDesc.setText("Meteo");
-        wSub.setText("Premi OK qui per scegliere la tua città");
-        return card;
+        v.setFocusable(true);
+        v.setClickable(true);
+        v.setLongClickable(true);
+        v.setSoundEffectsEnabled(false);
     }
 
     private void buildFolders() {
@@ -450,30 +493,13 @@ public class MainActivity extends Activity {
         if (f != null && f.getTag() instanceof Integer && openIdx < 0) focusIdx = (Integer) f.getTag();
 
         foldersBox.removeAllViews();
-        int cols = 3;
-        LinearLayout row = null;
         for (int i = 0; i < folders.size(); i++) {
-            if (i % cols == 0) {
-                row = new LinearLayout(this);
-                row.setOrientation(LinearLayout.HORIZONTAL);
-                row.setClipChildren(false);
-                LinearLayout.LayoutParams rlp = new LinearLayout.LayoutParams(-1, dp(92));
-                if (i > 0) rlp.topMargin = dp(24);
-                foldersBox.addView(row, rlp);
-            }
             View tile = folderTile(i);
             LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, -1, 1);
-            if (i % cols > 0) tlp.leftMargin = dp(24);
-            row.addView(tile, tlp);
+            if (i > 0) tlp.leftMargin = dp(16);
+            foldersBox.addView(tile, tlp);
         }
-        // riempi l'ultima riga per mantenere le larghezze
-        if (row != null) {
-            for (int k = folders.size() % cols; k > 0 && k < cols; k++) {
-                LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(0, -1, 1);
-                tlp.leftMargin = dp(24);
-                row.addView(new View(this), tlp);
-            }
-        }
+        buildFavs();
 
         if (openIdx >= 0) openFrom = findFolderView(openIdx);
         if (firstBuild && !folders.isEmpty()) {
@@ -484,37 +510,31 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Elemento del dock: icona sopra, nome sotto, vetro tinto col colore della cartella. */
     private View folderTile(final int idx) {
         Folder fo = folders.get(idx);
         int[] c = COLORS[fo.color % COLORS.length];
 
         LinearLayout tile = new LinearLayout(this);
-        tile.setOrientation(LinearLayout.HORIZONTAL);
-        tile.setGravity(Gravity.CENTER_VERTICAL);
-        tile.setPadding(dp(22), 0, dp(16), 0);
-        style3d(tile, c, dp(14));
+        tile.setOrientation(LinearLayout.VERTICAL);
+        tile.setGravity(Gravity.CENTER);
+        tile.setPadding(dp(8), dp(4), dp(8), dp(4));
+        styleGlass(tile, dp(18), c[0], true);
         tile.setTag(idx);
 
-        TextView icon = text(30, Color.WHITE);
+        TextView icon = text(24, Color.WHITE);
         icon.setText(fo.icon);
+        icon.setIncludeFontPadding(false);
         tile.addView(icon);
 
-        LinearLayout col = new LinearLayout(this);
-        col.setOrientation(LinearLayout.VERTICAL);
-        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(0, -2, 1);
-        lp.leftMargin = dp(16);
-        tile.addView(col, lp);
-
-        TextView name = text(20, Color.WHITE);
-        name.setTypeface(Typeface.create("sans-serif-medium", Typeface.NORMAL));
+        TextView name = text(14, Color.WHITE);
         name.setText(fo.name);
         name.setSingleLine(true);
-        col.addView(name);
-
-        int n = visibleApps(fo).size();
-        TextView count = text(13, 0x99FFFFFF);
-        count.setText(n == 1 ? "1 app" : n + " app");
-        col.addView(count);
+        name.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        name.setGravity(Gravity.CENTER);
+        LinearLayout.LayoutParams nlp = new LinearLayout.LayoutParams(-1, -2);
+        nlp.topMargin = dp(4);
+        tile.addView(name, nlp);
 
         tile.setOnClickListener(v -> openFolder(idx, v));
         tile.setOnLongClickListener(v -> {
@@ -522,6 +542,103 @@ public class MainActivity extends Activity {
             return true;
         });
         return tile;
+    }
+
+    // ------------------------------------------------------------------ preferiti
+
+    private static final int MAX_FAVS = 5;
+    private static final String[] DEFAULT_FAVS = {
+            "com.netflix.ninja", "com.google.android.youtube.tv", "it.rainet.androidtv",
+            "com.amazon.amazonvideo.livingroom", "com.spotify.tv.android"};
+
+    private void loadFavs() {
+        favs.clear();
+        String raw = prefs.getString("favs", null);
+        if (raw == null) {
+            favs.addAll(Arrays.asList(DEFAULT_FAVS));
+        } else if (!raw.isEmpty()) {
+            favs.addAll(Arrays.asList(raw.split(",")));
+        }
+    }
+
+    private void saveFavs() {
+        prefs.edit().putString("favs", android.text.TextUtils.join(",", favs)).apply();
+    }
+
+    private List<AppItem> visibleFavs() {
+        List<AppItem> list = new ArrayList<>();
+        for (String p : favs) {
+            AppItem a = apps.get(p);
+            if (a != null && list.size() < MAX_FAVS) list.add(a);
+        }
+        return list;
+    }
+
+    private void buildFavs() {
+        String focusedPkg = null;
+        View f = getCurrentFocus();
+        if (f != null && f.getParent() == favBox && f.getTag() instanceof String) focusedPkg = (String) f.getTag();
+
+        favBox.removeAllViews();
+        List<AppItem> list = visibleFavs();
+        int vis = list.isEmpty() ? View.GONE : View.VISIBLE;
+        favLabel.setVisibility(vis);
+        favBox.setVisibility(vis);
+
+        int gap = dp(20);
+        int inner = getResources().getDisplayMetrics().widthPixels - dp(112);
+        int w = (inner - gap * (MAX_FAVS - 1)) / MAX_FAVS;
+        int h = w * 9 / 16;
+        View toFocus = null;
+        for (int i = 0; i < list.size(); i++) {
+            View t = appTile(list.get(i), GREY, w, h, true);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(w, h);
+            if (i > 0) lp.leftMargin = gap;
+            favBox.addView(t, lp);
+            if (list.get(i).pkg.equals(focusedPkg)) toFocus = t;
+        }
+        if (toFocus != null) toFocus.requestFocus();
+    }
+
+    private void toggleFav(String pkg) {
+        if (favs.remove(pkg)) {
+            toast("Tolta dai preferiti");
+        } else {
+            if (visibleFavs().size() >= MAX_FAVS) {
+                toast("Puoi avere al massimo " + MAX_FAVS + " preferiti");
+                return;
+            }
+            favs.add(pkg);
+            toast("Aggiunta ai preferiti");
+        }
+        saveFavs();
+        buildFavs();
+    }
+
+    private void moveFav(String pkg, int dir) {
+        List<String> vis = new ArrayList<>();
+        for (String p : favs) if (apps.containsKey(p)) vis.add(p);
+        int i = vis.indexOf(pkg), j = i + dir;
+        if (i < 0 || j < 0 || j >= vis.size()) return;
+        Collections.swap(vis, i, j);
+        for (String p : favs) if (!apps.containsKey(p)) vis.add(p);
+        favs.clear();
+        favs.addAll(vis);
+        saveFavs();
+        buildFavs();
+        View v = favBox.findViewWithTag(pkg);
+        if (v != null) v.requestFocus();
+    }
+
+    private void favOptions(final AppItem a) {
+        String[] opts = {"Rimuovi dai preferiti", "Sposta a sinistra", "Sposta a destra", "Info app"};
+        dialog().setTitle(a.label).setItems(opts, (d, w) -> {
+            if (w == 0) toggleFav(a.pkg);
+            else if (w == 1) moveFav(a.pkg, -1);
+            else if (w == 2) moveFav(a.pkg, 1);
+            else safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                        Uri.parse("package:" + a.pkg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+        }).show();
     }
 
     private void buildPanel(final Folder fo) {
@@ -575,7 +692,7 @@ public class MainActivity extends Activity {
                 if (i > 0) rlp.topMargin = gap;
                 grid.addView(row, rlp);
             }
-            View tile = i < list.size() ? appTile(list.get(i), c, tileW, tileH) : addTile();
+            View tile = i < list.size() ? appTile(list.get(i), c, tileW, tileH, false) : addTile();
             LinearLayout.LayoutParams tlp = new LinearLayout.LayoutParams(tileW, tileH);
             if (i % cols > 0) tlp.leftMargin = gap;
             row.addView(tile, tlp);
@@ -596,7 +713,7 @@ public class MainActivity extends Activity {
         panel.addView(scroll, slp);
     }
 
-    private View appTile(final AppItem a, int[] c, int w, int h) {
+    private View appTile(final AppItem a, int[] c, int w, int h, final boolean fav) {
         FrameLayout tile = new FrameLayout(this);
         style3d(tile, c, dp(10), false);
         tile.setTag(a.pkg);
@@ -628,7 +745,8 @@ public class MainActivity extends Activity {
 
         tile.setOnClickListener(v -> launch(a));
         tile.setOnLongClickListener(v -> {
-            appOptions(a);
+            if (fav) favOptions(a);
+            else appOptions(a);
             return true;
         });
         return tile;
@@ -925,24 +1043,28 @@ public class MainActivity extends Activity {
     private void appOptions(final AppItem a) {
         if (openIdx < 0) return;
         final Folder fo = folders.get(openIdx);
-        String[] opts = {"Rimuovi dalla cartella", "Sposta in un'altra cartella",
+        String[] opts = {favs.contains(a.pkg) ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti",
+                "Rimuovi dalla cartella", "Sposta in un'altra cartella",
                 "Sposta all'inizio", "Sposta a sinistra", "Sposta a destra", "Info app"};
         dialog().setTitle(a.label).setItems(opts, (d, w) -> {
             switch (w) {
                 case 0:
+                    toggleFav(a.pkg);
+                    break;
+                case 1:
                     fo.apps.remove(a.pkg);
                     saveAndRefresh();
                     refreshOpenPanel();
                     break;
-                case 1:
+                case 2:
                     moveToOtherFolder(a, fo);
                     break;
-                case 2:
                 case 3:
                 case 4:
-                    reorder(fo, a.pkg, w);
-                    break;
                 case 5:
+                    reorder(fo, a.pkg, w - 1);
+                    break;
+                case 6:
                     safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                             Uri.parse("package:" + a.pkg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
                     break;
@@ -1248,10 +1370,7 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> showWeather(j, city));
             } catch (Exception e) {
                 lastWeather = 0;
-                runOnUiThread(() -> {
-                    wDesc.setText("Meteo non disponibile");
-                    wSub.setText(city + " · nessuna connessione");
-                });
+                runOnUiThread(() -> weatherLine.setText("  ·  meteo non disponibile"));
             }
         });
     }
@@ -1260,54 +1379,15 @@ public class MainActivity extends Activity {
         try {
             JSONObject cur = j.getJSONObject("current");
             int code = cur.getInt("weather_code");
-            wIcon.setText(weatherEmoji(code));
-            wTemp.setText(Math.round(cur.getDouble("temperature_2m")) + "°");
-            wDesc.setText(weatherText(code));
-
+            weatherLine.setText("  ·  " + weatherEmoji(code) + " " + Math.round(cur.getDouble("temperature_2m"))
+                    + "° " + weatherText(code));
             JSONObject d = j.getJSONObject("daily");
-            JSONArray time = d.getJSONArray("time");
-            JSONArray wc = d.getJSONArray("weather_code");
-            JSONArray mx = d.getJSONArray("temperature_2m_max");
-            JSONArray mn = d.getJSONArray("temperature_2m_min");
-            try {
-                int sr = hm(d.getJSONArray("sunrise").getString(0));
-                int ss = hm(d.getJSONArray("sunset").getString(0));
-                prefs.edit().putInt("sr", sr).putInt("ss", ss).apply();
-                sky.setSun(sr, ss);
-            } catch (Exception ignored) {
-            }
-            wSub.setText(city + " · max " + Math.round(mx.getDouble(0)) + "°  min " + Math.round(mn.getDouble(0)) + "°");
-
-            wForecast.removeAllViews();
-            SimpleDateFormat in = new SimpleDateFormat("yyyy-MM-dd", Locale.US);
-            SimpleDateFormat out = new SimpleDateFormat("EEE", Locale.ITALIAN);
-            for (int k = 1; k < Math.min(5, time.length()); k++) {
-                LinearLayout day = new LinearLayout(this);
-                day.setOrientation(LinearLayout.VERTICAL);
-                day.setGravity(Gravity.CENTER_HORIZONTAL);
-                LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(dp(78), -2);
-                wForecast.addView(day, lp);
-
-                String name;
-                try {
-                    Date dt = in.parse(time.getString(k));
-                    name = out.format(dt);
-                    name = name.substring(0, 1).toUpperCase(Locale.ITALIAN) + name.substring(1).replace(".", "");
-                } catch (Exception e) {
-                    name = "";
-                }
-                TextView n = text(13, 0xFFAEB5C2);
-                n.setText(name);
-                day.addView(n);
-                TextView ic = text(20, Color.WHITE);
-                ic.setText(weatherEmoji(wc.getInt(k)));
-                day.addView(ic);
-                TextView t = text(13, 0xFFAEB5C2);
-                t.setText(Math.round(mx.getDouble(k)) + "° " + Math.round(mn.getDouble(k)) + "°");
-                day.addView(t);
-            }
+            int sr = hm(d.getJSONArray("sunrise").getString(0));
+            int ss = hm(d.getJSONArray("sunset").getString(0));
+            prefs.edit().putInt("sr", sr).putInt("ss", ss).apply();
+            sky.setSun(sr, ss);
         } catch (Exception e) {
-            wDesc.setText("Meteo non disponibile");
+            if (weatherLine.getText().length() == 0) weatherLine.setText("  ·  meteo non disponibile");
         }
     }
 
@@ -1421,7 +1501,6 @@ public class MainActivity extends Activity {
     }
 
     private void showLauncherMenu() {
-        play(sClick);
         String[] opts = {
                 "Impostazioni del TV",
                 soundOn ? "Suoni del launcher: attivi (premi per spegnere)" : "Suoni del launcher: spenti (premi per accendere)",
@@ -1453,20 +1532,27 @@ public class MainActivity extends Activity {
 
     // ------------------------------------------------------------------ cielo che cambia con l'ora
 
-    /** Sfondo: cielo con colori della giornata, sole che percorre un arco, luna e stelle di notte. */
+    /**
+     * Sfondo: paesaggio di montagne e lago disegnato in codice. Cielo, sole, luna e stelle seguono l'ora
+     * del giorno (alba e tramonto reali presi dal meteo). Ridisegnato una volta al minuto a mezza risoluzione.
+     */
     static final class SkyView extends View {
         private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final float[] stars = new float[110 * 4];
+        private final Paint bmp = new Paint(Paint.FILTER_BITMAP_FLAG);
+        private final float[] stars = new float[120 * 4];
         private int srMin = 7 * 60;
         private int ssMin = 18 * 60;
+        private Bitmap scene, frame;
+        private int frameMinute = -1;
+        private final Rect dst = new Rect();
 
         SkyView(Context c) {
             super(c);
             Random r = new Random(7);
             for (int i = 0; i < stars.length; i += 4) {
                 stars[i] = r.nextFloat();
-                stars[i + 1] = r.nextFloat() * 0.75f;
-                stars[i + 2] = 0.6f + r.nextFloat() * 1.4f;
+                stars[i + 1] = r.nextFloat();
+                stars[i + 2] = 0.5f + r.nextFloat() * 1.2f;
                 stars[i + 3] = 0.3f + r.nextFloat() * 0.7f;
             }
         }
@@ -1476,11 +1562,8 @@ public class MainActivity extends Activity {
                 srMin = sunrise;
                 ssMin = sunset;
             }
+            frameMinute = -1;
             invalidate();
-        }
-
-        private float dp(float v) {
-            return v * getResources().getDisplayMetrics().density;
         }
 
         @Override
@@ -1488,8 +1571,26 @@ public class MainActivity extends Activity {
             int w = getWidth(), h = getHeight();
             if (w == 0 || h == 0) return;
             Calendar cal = Calendar.getInstance();
-            float m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+            int m = cal.get(Calendar.HOUR_OF_DAY) * 60 + cal.get(Calendar.MINUTE);
+            int bw = Math.max(1, w / 2), bh = Math.max(1, h / 2);
+            if (frame == null || frame.getWidth() != bw || frame.getHeight() != bh || frameMinute != m) {
+                render(m, bw, bh);
+                frameMinute = m;
+            }
+            dst.set(0, 0, w, h);
+            canvas.drawBitmap(frame, null, dst, bmp);
+        }
+
+        private void render(int m, int w, int h) {
+            if (scene == null || scene.getWidth() != w || scene.getHeight() != h) {
+                if (scene != null) scene.recycle();
+                if (frame != null) frame.recycle();
+                scene = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+                frame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
+            }
+            Canvas c = new Canvas(scene);
             int sr = srMin, ss = ssMin, noon = (sr + ss) / 2;
+            float hz = h * 0.70f;
 
             // {minuto, colore alto, colore basso}
             int[][] f = {
@@ -1500,8 +1601,8 @@ public class MainActivity extends Activity {
                     {sr + 120, 0xFF3A74BC, 0xFFA6D0EE},
                     {noon, 0xFF2766C0, 0xFF8CC4F2},
                     {ss - 120, 0xFF2C62AA, 0xFF9EC2E0},
-                    {ss - 20, 0xFF3A3C82, 0xFFF4864C},
-                    {ss + 30, 0xFF201E4E, 0xFF8C3C5C},
+                    {ss - 20, 0xFF4A3C88, 0xFFF08A70},
+                    {ss + 30, 0xFF2A1E56, 0xFFC0507A},
                     {ss + 100, 0xFF0A0E26, 0xFF1A1838},
                     {24 * 60, 0xFF050916, 0xFF0B1230}};
             int k = 0;
@@ -1510,11 +1611,10 @@ public class MainActivity extends Activity {
             float t = clamp((m - f[k][0]) / span);
             int top = lerp(f[k][1], f[k + 1][1], t);
             int bottom = lerp(f[k][2], f[k + 1][2], t);
-            paint.setShader(new LinearGradient(0, 0, 0, h, top, bottom, Shader.TileMode.CLAMP));
-            canvas.drawRect(0, 0, w, h, paint);
+            paint.setShader(new LinearGradient(0, 0, 0, hz, top, bottom, Shader.TileMode.CLAMP));
+            c.drawRect(0, 0, w, h, paint);
             paint.setShader(null);
 
-            // notte: 1 di notte, 0 di giorno, sfumato all'alba e al tramonto
             float night;
             if (m < sr - 90 || m > ss + 90) night = 1f;
             else if (m < sr - 20) night = (sr - 20 - m) / 70f;
@@ -1522,34 +1622,32 @@ public class MainActivity extends Activity {
             else night = 0f;
             night = clamp(night);
 
-            // stelle
             if (night > 0) {
                 paint.setColor(Color.WHITE);
+                float unit = w / 960f;
                 for (int i = 0; i < stars.length; i += 4) {
                     paint.setAlpha((int) (255 * night * stars[i + 3]));
-                    canvas.drawCircle(stars[i] * w, stars[i + 1] * h, dp(stars[i + 2]), paint);
+                    c.drawCircle(stars[i] * w, stars[i + 1] * hz * 0.85f, Math.max(0.6f, stars[i + 2] * unit * 1.4f), paint);
                 }
                 paint.setAlpha(255);
             }
 
-            float horizon = h * 0.95f;
-
-            // sole
+            // sole (dietro le montagne)
             if (m > sr - 25 && m < ss + 25) {
                 float p = (m - sr) / (float) (ss - sr);
                 float elev = (float) Math.sin(Math.PI * clamp(p));
                 float x = w * (0.06f + 0.88f * clamp(p));
-                float y = horizon - elev * h * 0.80f;
+                float y = hz - elev * h * 0.62f;
                 float a = clamp(Math.min((m - (sr - 25)) / 50f, ((ss + 25) - m) / 50f));
                 int col = lerp(0xFFFF8A40, 0xFFFFF3C8, clamp(elev * 1.8f));
-                float glowR = dp(260) * (1.2f - elev * 0.4f);
+                float glowR = w * 0.28f * (1.2f - elev * 0.4f);
                 paint.setShader(new RadialGradient(x, y, glowR,
                         new int[]{withAlpha(col, (int) (150 * a)), withAlpha(col, (int) (50 * a)), withAlpha(col, 0)},
                         new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
-                canvas.drawCircle(x, y, glowR, paint);
+                c.drawRect(0, 0, w, hz, paint);
                 paint.setShader(null);
                 paint.setColor(withAlpha(col, (int) (255 * a)));
-                canvas.drawCircle(x, y, dp(48), paint);
+                c.drawCircle(x, y, w * 0.045f, paint);
             }
 
             // luna
@@ -1559,15 +1657,61 @@ public class MainActivity extends Activity {
                 float p = clamp((mm - start) / (end - start));
                 float elev = (float) Math.sin(Math.PI * p);
                 float x = w * (0.08f + 0.84f * p);
-                float y = horizon - elev * h * 0.70f;
-                paint.setShader(new RadialGradient(x, y, dp(150),
-                        new int[]{withAlpha(0xFFDCE4FF, (int) (70 * night)), withAlpha(0xFFDCE4FF, 0)},
+                float y = hz - elev * h * 0.55f;
+                paint.setShader(new RadialGradient(x, y, w * 0.15f,
+                        new int[]{withAlpha(0xFFDCE4FF, (int) (60 * night)), withAlpha(0xFFDCE4FF, 0)},
                         null, Shader.TileMode.CLAMP));
-                canvas.drawCircle(x, y, dp(150), paint);
+                c.drawCircle(x, y, w * 0.15f, paint);
                 paint.setShader(null);
                 paint.setColor(withAlpha(0xFFE9EDF7, (int) (255 * night)));
-                canvas.drawCircle(x, y, dp(32), paint);
+                c.drawCircle(x, y, w * 0.03f, paint);
             }
+
+            // montagne: tre catene, le lontane prendono il colore del cielo
+            int dark = 0xFF0B0E1A;
+            float[][] layers = {
+                    {1.3f, hz - h * 0.05f, h * 0.34f, 0.35f},
+                    {4.1f, hz - h * 0.01f, h * 0.22f, 0.62f},
+                    {7.7f, hz + 1, h * 0.12f, 0.86f}};
+            for (float[] l : layers) {
+                android.graphics.Path path = new android.graphics.Path();
+                path.moveTo(0, hz + 2);
+                for (int x = 0; x <= w; x += 2) path.lineTo(x, ridge(x / (float) w, l[0], l[1], l[2]));
+                path.lineTo(w, hz + 2);
+                path.close();
+                paint.setColor(lerp(bottom, dark, l[3]));
+                c.drawPath(path, paint);
+            }
+
+            // lago: base scura + riflesso capovolto + velatura
+            Canvas fc = new Canvas(frame);
+            fc.drawBitmap(scene, 0, 0, null);
+            int lake = (int) (h - hz);
+            paint.setColor(lerp(bottom, dark, 0.7f));
+            fc.drawRect(0, hz, w, h, paint);
+            fc.save();
+            fc.scale(1, -1, 0, hz);
+            Paint refl = new Paint(Paint.FILTER_BITMAP_FLAG);
+            refl.setAlpha(150);
+            Rect src = new Rect(0, (int) hz - lake, w, (int) hz);
+            fc.drawBitmap(scene, src, src, refl);
+            fc.restore();
+            paint.setShader(new LinearGradient(0, hz, 0, h,
+                    withAlpha(lerp(bottom, dark, 0.5f), 90), withAlpha(dark, 215), Shader.TileMode.CLAMP));
+            fc.drawRect(0, hz, w, h, paint);
+            paint.setShader(null);
+            paint.setColor(0x14FFFFFF);
+            for (int i = 0; i < 14; i++) {
+                float y = hz + 3 + i * lake / 15f;
+                float x0 = w * (0.1f + ((i * 37) % 60) / 100f);
+                fc.drawRect(x0, y, x0 + w * 0.12f, y + 1, paint);
+            }
+        }
+
+        private static float ridge(float x, float s, float base, float amp) {
+            double a = Math.abs(Math.sin(x * 2.1 + s)) * 0.55 + Math.abs(Math.sin(x * 5.3 + s * 1.7)) * 0.28
+                    + Math.abs(Math.sin(x * 11.7 + s * 2.3)) * 0.12 + Math.sin(x * 23 + s) * 0.03;
+            return base - amp * (float) a;
         }
 
         private static float clamp(float v) {
@@ -1690,6 +1834,7 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ utilità
 
     private void updateGreeting() {
+        if (greeting == null) return;
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         greeting.setText(h >= 5 && h < 13 ? "Buongiorno" : h >= 13 && h < 18 ? "Buon pomeriggio" : "Buonasera");
     }
