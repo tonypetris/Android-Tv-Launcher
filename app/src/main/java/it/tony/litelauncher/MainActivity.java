@@ -518,7 +518,7 @@ public class MainActivity extends Activity {
         LinearLayout tile = new LinearLayout(this);
         tile.setOrientation(LinearLayout.VERTICAL);
         tile.setGravity(Gravity.CENTER);
-        tile.setPadding(dp(8), dp(4), dp(8), dp(4));
+        tile.setPadding(dp(4), dp(4), dp(4), dp(4));
         styleGlass(tile, dp(18), c[0], true);
         tile.setTag(idx);
 
@@ -527,7 +527,7 @@ public class MainActivity extends Activity {
         icon.setIncludeFontPadding(false);
         tile.addView(icon);
 
-        TextView name = text(14, Color.WHITE);
+        TextView name = text(13, Color.WHITE);
         name.setText(fo.name);
         name.setSingleLine(true);
         name.setEllipsize(android.text.TextUtils.TruncateAt.END);
@@ -1589,6 +1589,7 @@ public class MainActivity extends Activity {
                 frame = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888);
             }
             Canvas c = new Canvas(scene);
+            c.drawColor(Color.BLACK); // pulizia completa: niente resti del disegno precedente
             int sr = srMin, ss = ssMin, noon = (sr + ss) / 2;
             float hz = h * 0.70f;
 
@@ -1611,6 +1612,7 @@ public class MainActivity extends Activity {
             float t = clamp((m - f[k][0]) / span);
             int top = lerp(f[k][1], f[k + 1][1], t);
             int bottom = lerp(f[k][2], f[k + 1][2], t);
+            paint.setColor(Color.WHITE); // opaco: l'alfa del pennello si somma alla sfumatura
             paint.setShader(new LinearGradient(0, 0, 0, hz, top, bottom, Shader.TileMode.CLAMP));
             c.drawRect(0, 0, w, h, paint);
             paint.setShader(null);
@@ -1641,6 +1643,7 @@ public class MainActivity extends Activity {
                 float a = clamp(Math.min((m - (sr - 25)) / 50f, ((ss + 25) - m) / 50f));
                 int col = lerp(0xFFFF8A40, 0xFFFFF3C8, clamp(elev * 1.8f));
                 float glowR = w * 0.28f * (1.2f - elev * 0.4f);
+                paint.setColor(Color.WHITE);
                 paint.setShader(new RadialGradient(x, y, glowR,
                         new int[]{withAlpha(col, (int) (150 * a)), withAlpha(col, (int) (50 * a)), withAlpha(col, 0)},
                         new float[]{0f, 0.35f, 1f}, Shader.TileMode.CLAMP));
@@ -1658,6 +1661,7 @@ public class MainActivity extends Activity {
                 float elev = (float) Math.sin(Math.PI * p);
                 float x = w * (0.08f + 0.84f * p);
                 float y = hz - elev * h * 0.55f;
+                paint.setColor(Color.WHITE);
                 paint.setShader(new RadialGradient(x, y, w * 0.15f,
                         new int[]{withAlpha(0xFFDCE4FF, (int) (60 * night)), withAlpha(0xFFDCE4FF, 0)},
                         null, Shader.TileMode.CLAMP));
@@ -1685,6 +1689,7 @@ public class MainActivity extends Activity {
 
             // lago: base scura + riflesso capovolto + velatura
             Canvas fc = new Canvas(frame);
+            fc.drawColor(Color.BLACK);
             fc.drawBitmap(scene, 0, 0, null);
             int lake = (int) (h - hz);
             paint.setColor(lerp(bottom, dark, 0.7f));
@@ -1696,6 +1701,7 @@ public class MainActivity extends Activity {
             Rect src = new Rect(0, (int) hz - lake, w, (int) hz);
             fc.drawBitmap(scene, src, src, refl);
             fc.restore();
+            paint.setColor(Color.WHITE);
             paint.setShader(new LinearGradient(0, hz, 0, h,
                     withAlpha(lerp(bottom, dark, 0.5f), 90), withAlpha(dark, 215), Shader.TileMode.CLAMP));
             fc.drawRect(0, hz, w, h, paint);
@@ -1706,6 +1712,7 @@ public class MainActivity extends Activity {
                 float x0 = w * (0.1f + ((i * 37) % 60) / 100f);
                 fc.drawRect(x0, y, x0 + w * 0.12f, y + 1, paint);
             }
+            paint.setColor(Color.WHITE);
         }
 
         private static float ridge(float x, float s, float base, float amp) {
