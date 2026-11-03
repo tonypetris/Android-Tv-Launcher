@@ -428,7 +428,7 @@ public class MainActivity extends Activity {
         cwScroll.setHorizontalScrollBarEnabled(false);
         cwScroll.setHorizontalFadingEdgeEnabled(false);
         cwScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        cwScroll.setClipChildren(true);   // le schede non finiscono sotto la freccia del bordo
+        cwScroll.setClipChildren(false);
         cwScroll.setClipToPadding(false);
         cwScroll.setPadding(dp(16), dp(8), dp(12), dp(8));
         cwScroll.setVisibility(View.GONE);
@@ -436,7 +436,11 @@ public class MainActivity extends Activity {
         cwBox.setOrientation(LinearLayout.HORIZONTAL);
         cwBox.setClipChildren(false);
         cwScroll.addView(cwBox, new FrameLayout.LayoutParams(-2, -2));
-        right.addView(cwScroll, new LinearLayout.LayoutParams(-1, -2));
+        // contenitore che taglia: le schede oltre la colonna non finiscono sotto la freccia del bordo
+        FrameLayout cwClip = new FrameLayout(this);
+        cwClip.setClipChildren(true);
+        cwClip.addView(cwScroll, new FrameLayout.LayoutParams(-1, -2));
+        right.addView(cwClip, new LinearLayout.LayoutParams(-1, -2));
 
         icons.addView(roundBtn(iconText("📺", 20), v -> launchTv()));
         icons.addView(roundBtn(iconText("☰", 22), v -> showAllApps()));
