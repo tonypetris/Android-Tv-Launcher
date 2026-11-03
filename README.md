@@ -10,6 +10,9 @@ Spegni e Riavvia. In alto a destra la fila **Continua a guardare** riprende film
 - **OK tenuto premuto** (o tasto **Menu**): sposta all'inizio / a sinistra / a destra, nascondi, info app
 - **App nascoste** (in alto): rimette in griglia un'app nascosta
 - **Home**: torna alla prima app
+- **Freccia ‹ sul bordo destro** (ci arrivi con →) o pulsante **⚙️**: apre il menu laterale, che scorre da destra.
+  Dentro: impostazioni del TV, suoni, città del meteo e la fila Continua a guardare, con un interruttore per ogni app.
+  Si chiude con Indietro o ←.
 
 ## 1. Compilare l'APK (gratis, senza installare nulla)
 1. Crea un account su github.com, poi un nuovo repository (anche privato).
@@ -32,8 +35,8 @@ Oppure concedilo da ADB:
 ```
 adb shell pm grant it.tony.litelauncher android.permission.READ_TV_LISTINGS
 ```
-Tieni premuto OK su un titolo per riprenderlo, aprire l'app o nasconderlo. La fila si spegne e riaccende
-dal menu ⚙️.
+Tieni premuto OK su un titolo per riprenderlo, aprire l'app, nascondere quel titolo o tutti i titoli dell'app.
+La fila e le singole app si accendono e spengono dal menu laterale.
 
 ## 3. Impostarlo come Home
 Prova prima così:

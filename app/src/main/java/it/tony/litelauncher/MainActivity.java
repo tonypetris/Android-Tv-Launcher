@@ -209,6 +209,18 @@ public class MainActivity extends Activity {
     private boolean cwOn = true;
     private final Runnable cwReload = this::loadWatchNext;
     private ContentObserver cwObserver;
+    private final Set<String> cwApps = new java.util.LinkedHashSet<>();
+    private static final int CW_SHOWN = 12;
+
+    // menu laterale che scorre da destra
+    private FrameLayout drawerDim;
+    private LinearLayout drawer;
+    private LinearLayout drawerList;
+    private ScrollView drawerScroll;
+    private View edgeTab;
+    private View drawerReturnFocus;
+    private boolean drawerOpen = false;
+    private int cwRowIdx = 3;
 
     private int openIdx = -1;
     private View openFrom;
@@ -289,19 +301,28 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
-        // Tasto Home: chiude la cartella aperta e torna alla prima cartella
+        // Tasto Home: chiude menu e cartella aperti e torna alla prima cartella
+        if (drawerOpen) closeDrawerNow();
         if (openIdx >= 0) closeFolder(false);
         if (foldersBox.getChildCount() > 0) focusFolder(0);
     }
 
     @Override
     public void onBackPressed() {
+        if (drawerOpen) {
+            closeDrawer();
+            return;
+        }
         if (openIdx >= 0) closeFolder(true);
         // altrimenti niente: siamo la Home
     }
 
     @Override
     public boolean onKeyDown(int keyCode, KeyEvent event) {
+        if (drawerOpen && keyCode == KeyEvent.KEYCODE_DPAD_LEFT) {
+            closeDrawer();
+            return true;
+        }
         if (keyCode == KeyEvent.KEYCODE_MENU) {
             View f = getCurrentFocus();
             if (f != null && f.isLongClickable()) {
@@ -400,16 +421,16 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams cllp = new LinearLayout.LayoutParams(-1, -2);
         cllp.topMargin = dp(16);
         cllp.leftMargin = dp(16);
-        cllp.bottomMargin = dp(8);
+        cllp.bottomMargin = 0;
         right.addView(cwLabel, cllp);
 
         cwScroll = new HorizontalScrollView(this);
         cwScroll.setHorizontalScrollBarEnabled(false);
         cwScroll.setHorizontalFadingEdgeEnabled(false);
         cwScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
-        cwScroll.setClipChildren(false);
+        cwScroll.setClipChildren(true);   // le schede non finiscono sotto la freccia del bordo
         cwScroll.setClipToPadding(false);
-        cwScroll.setPadding(dp(16), 0, dp(12), 0);
+        cwScroll.setPadding(dp(16), dp(8), dp(12), dp(8));
         cwScroll.setVisibility(View.GONE);
         cwBox = new LinearLayout(this);
         cwBox.setOrientation(LinearLayout.HORIZONTAL);
@@ -421,7 +442,7 @@ public class MainActivity extends Activity {
         icons.addView(roundBtn(iconText("☰", 22), v -> showAllApps()));
         icons.addView(roundBtn(iconGlyph(false), v -> powerOff()));
         icons.addView(roundBtn(iconGlyph(true), v -> restart()));
-        icons.addView(roundBtn(iconText("⚙️", 20), v -> showLauncherMenu()));
+        icons.addView(roundBtn(iconText("⚙️", 20), v -> openDrawer(false)));
 
         content.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1));
 
@@ -468,6 +489,65 @@ public class MainActivity extends Activity {
         panel.setPadding(dp(26), dp(20), dp(26), dp(24));
         FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(panelWidth(), -2, Gravity.CENTER);
         overlay.addView(panel, plp);
+
+        // --- freccia sul bordo destro: apre il menu laterale
+        TextView arrow = text(26, Color.WHITE);
+        arrow.setText("‹");
+        arrow.setGravity(Gravity.CENTER);
+        arrow.setIncludeFontPadding(false);
+        arrow.setContentDescription("Apri il menu");
+        styleGlass(arrow, dp(16), 0x141824, true);
+        arrow.setOnClickListener(v -> {
+            play(sClick);
+            openDrawer(false);
+        });
+        arrow.setOnLongClickListener(v -> true);
+        edgeTab = arrow;
+        FrameLayout.LayoutParams alp = new FrameLayout.LayoutParams(dp(32), dp(88),
+                Gravity.END | Gravity.CENTER_VERTICAL);
+        alp.rightMargin = dp(12);
+        root.addView(arrow, alp);
+
+        // --- menu laterale
+        drawerDim = new FrameLayout(this);
+        drawerDim.setBackgroundColor(0x8006080C);
+        drawerDim.setVisibility(View.GONE);
+        drawerDim.setClickable(true);
+        drawerDim.setOnClickListener(v -> closeDrawer());
+        root.addView(drawerDim, new FrameLayout.LayoutParams(-1, -1));
+
+        drawer = new LinearLayout(this);
+        drawer.setOrientation(LinearLayout.VERTICAL);
+        drawer.setClickable(true);
+        drawer.setClipChildren(false);
+        GradientDrawable dbg = new GradientDrawable();
+        dbg.setColor(0xF2171B26);
+        float dr = dp(24);
+        dbg.setCornerRadii(new float[]{dr, dr, 0, 0, 0, 0, dr, dr});
+        dbg.setStroke(dp(1), 0x33FFFFFF);
+        drawer.setBackground(dbg);
+        drawer.setPadding(dp(28), dp(30), dp(24), dp(24));
+        drawerDim.addView(drawer, new FrameLayout.LayoutParams(dp(400), -1, Gravity.END));
+
+        TextView dTitle = text(22, Color.WHITE);
+        dTitle.setText("Menu");
+        drawer.addView(dTitle);
+        TextView dHint = text(13, 0xFF8A93A3);
+        dHint.setText("Indietro o ← per chiudere");
+        LinearLayout.LayoutParams dhp = new LinearLayout.LayoutParams(-2, -2);
+        dhp.bottomMargin = dp(14);
+        drawer.addView(dHint, dhp);
+
+        drawerScroll = new ScrollView(this);
+        drawerScroll.setVerticalScrollBarEnabled(false);
+        drawerScroll.setClipChildren(false);
+        drawerScroll.setClipToPadding(false);
+        drawerScroll.setPadding(dp(6), dp(6), dp(10), dp(6));
+        drawerList = new LinearLayout(this);
+        drawerList.setOrientation(LinearLayout.VERTICAL);
+        drawerList.setClipChildren(false);
+        drawerScroll.addView(drawerList);
+        drawer.addView(drawerScroll, new LinearLayout.LayoutParams(-1, 0, 1));
 
         setContentView(root);
         updateGreeting();
@@ -951,6 +1031,7 @@ public class MainActivity extends Activity {
         muteTicks(500);
         buildPanel(folders.get(idx));
         content.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        if (edgeTab != null) edgeTab.setFocusable(false);
         overlay.setVisibility(View.VISIBLE);
         overlay.setAlpha(0f);
         panel.setAlpha(0f);
@@ -981,6 +1062,7 @@ public class MainActivity extends Activity {
         if (animate) play(sClose);
         muteTicks(400);
         content.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        if (edgeTab != null) edgeTab.setFocusable(true);
         if (animate) {
             panel.animate().scaleX(0.15f).scaleY(0.15f).alpha(0f).setDuration(220)
                     .setInterpolator(new AccelerateInterpolator()).start();
@@ -1558,37 +1640,6 @@ public class MainActivity extends Activity {
         muteTicksUntil = Math.max(muteTicksUntil, System.currentTimeMillis() + ms);
     }
 
-    private void showLauncherMenu() {
-        boolean hasHidden = !prefs.getStringSet("cw_hidden", Collections.<String>emptySet()).isEmpty();
-        List<String> opts = new ArrayList<>(Arrays.asList(
-                "Impostazioni del TV",
-                soundOn ? "Suoni del launcher: attivi (premi per spegnere)" : "Suoni del launcher: spenti (premi per accendere)",
-                "Cambia città del meteo",
-                cwOn ? "Fila Continua a guardare: attiva (premi per spegnere)"
-                        : "Fila Continua a guardare: spenta (premi per accendere)"));
-        if (hasHidden) opts.add("Mostra di nuovo i titoli nascosti");
-        dialog().setTitle("Lite Launcher").setItems(opts.toArray(new String[0]), (d, w) -> {
-            if (w == 0) {
-                safeStart(new Intent(Settings.ACTION_SETTINGS));
-            } else if (w == 1) {
-                soundOn = !soundOn;
-                prefs.edit().putBoolean("sound", soundOn).apply();
-                play(sClick);
-                toast(soundOn ? "Suoni attivi" : "Suoni spenti");
-            } else if (w == 2) {
-                askCity();
-            } else if (w == 3) {
-                setWatchNextOn(!cwOn);
-            } else {
-                prefs.edit().remove("cw_hidden").apply();
-                cwSignature = "";
-                loadWatchNext();
-                toast("Titoli nascosti di nuovo visibili");
-            }
-        }).show();
-    }
-
-
     // ------------------------------------------------------------------ continua a guardare
 
     private void startWatchNext() {
@@ -1683,9 +1734,21 @@ public class MainActivity extends Activity {
         final Set<String> installed = new HashSet<>(apps.keySet());
         final Set<String> hidden = new HashSet<>(prefs.getStringSet("cw_hidden", Collections.<String>emptySet()));
         loader.execute(() -> {
-            final List<WatchNext.Item> list = WatchNext.load(this, installed, hidden);
+            final List<WatchNext.Item> all = WatchNext.load(this, installed, hidden);
             runOnUiThread(() -> {
-                if (!isFinishing() && !isDestroyed()) showWatchNext(list);
+                if (isFinishing() || isDestroyed()) return;
+                if (all == null) {
+                    showWatchNext(null);
+                    return;
+                }
+                // ricordo le app che scrivono nella fila, per poterle spegnere dal menu
+                Set<String> off = prefs.getStringSet("cw_off_apps", Collections.<String>emptySet());
+                List<WatchNext.Item> list = new ArrayList<>();
+                for (WatchNext.Item it : all) {
+                    cwApps.add(it.pkg);
+                    if (!off.contains(it.pkg) && list.size() < CW_SHOWN) list.add(it);
+                }
+                showWatchNext(list);
             });
         });
     }
@@ -1826,8 +1889,9 @@ public class MainActivity extends Activity {
 
     private void watchOptions(final WatchNext.Item it) {
         final AppItem a = apps.get(it.pkg);
-        String[] opts = {"Riprendi", a != null ? "Apri " + a.label : "Apri l'app",
-                "Nascondi questo titolo", "Nascondi la fila Continua a guardare"};
+        final String name = appName(it.pkg);
+        String[] opts = {"Riprendi", "Apri " + name, "Nascondi questo titolo",
+                "Nascondi tutti i titoli di " + name, "Altre opzioni nel menu laterale"};
         dialog().setTitle(it.title).setItems(opts, (d, w) -> {
             if (w == 0) {
                 resume(it);
@@ -1838,11 +1902,212 @@ public class MainActivity extends Activity {
                 hidden.add(it.key);
                 prefs.edit().putStringSet("cw_hidden", hidden).apply();
                 loadWatchNext();
-                toast("Nascosto. Lo rimetti dal menu ⚙️");
+                toast("Nascosto. Lo rimetti dal menu ‹");
+            } else if (w == 3) {
+                Set<String> off = new HashSet<>(prefs.getStringSet("cw_off_apps", Collections.<String>emptySet()));
+                off.add(it.pkg);
+                prefs.edit().putStringSet("cw_off_apps", off).apply();
+                cwSignature = "";
+                loadWatchNext();
+                toast("Titoli di " + name + " nascosti. Li riaccendi dal menu ‹");
             } else {
-                setWatchNextOn(false);
+                openDrawer(true);
             }
         }).show();
+    }
+
+
+    // ------------------------------------------------------------------ menu laterale
+
+    private void openDrawer(boolean atWatchNext) {
+        if (drawerOpen) return;
+        if (openIdx >= 0) closeFolder(false);
+        drawerOpen = true;
+        drawerReturnFocus = getCurrentFocus();
+        play(sOpen);
+        muteTicks(500);
+        buildDrawer(-1);
+        content.setDescendantFocusability(ViewGroup.FOCUS_BLOCK_DESCENDANTS);
+        edgeTab.setFocusable(false);
+        drawerDim.setVisibility(View.VISIBLE);
+        drawerDim.setAlpha(0f);
+        drawerDim.animate().alpha(1f).setDuration(220).start();
+        drawer.setTranslationX(dp(400));
+        drawer.animate().translationX(0).setDuration(300).setInterpolator(new DecelerateInterpolator(2f)).start();
+        drawer.post(() -> {
+            View first = atWatchNext ? drawerList.findViewWithTag(cwRowIdx) : null;
+            if (first == null) first = findFocusableIn(drawerList);
+            if (first != null) first.requestFocus();
+        });
+    }
+
+    private void closeDrawer() {
+        if (!drawerOpen) return;
+        drawerOpen = false;
+        play(sClose);
+        muteTicks(400);
+        drawer.animate().translationX(dp(400)).setDuration(240).setInterpolator(new AccelerateInterpolator()).start();
+        drawerDim.animate().alpha(0f).setDuration(260).withEndAction(() -> drawerDim.setVisibility(View.GONE)).start();
+        restoreAfterDrawer();
+    }
+
+    private void closeDrawerNow() {
+        drawerOpen = false;
+        drawer.animate().cancel();
+        drawerDim.animate().cancel();
+        drawerDim.setVisibility(View.GONE);
+        restoreAfterDrawer();
+    }
+
+    private void restoreAfterDrawer() {
+        content.setDescendantFocusability(ViewGroup.FOCUS_AFTER_DESCENDANTS);
+        edgeTab.setFocusable(true);
+        View back = drawerReturnFocus;
+        drawerReturnFocus = null;
+        if (back != null && back.isAttachedToWindow() && back.getVisibility() == View.VISIBLE) back.requestFocus();
+        else edgeTab.requestFocus();
+    }
+
+    /** Ricostruisce le voci; se keepIdx >= 0 rimette il focus sulla stessa voce. */
+    private void buildDrawer(int keepIdx) {
+        drawerList.removeAllViews();
+        int i = 0;
+
+        drawerSection("Generale");
+        drawerRow(i++, "⚙️", "Impostazioni del TV", null,
+                () -> safeStart(new Intent(Settings.ACTION_SETTINGS)));
+        drawerRow(i++, soundOn ? "🔊" : "🔇", "Suoni del launcher", soundOn ? "Attivi" : "Spenti", () -> {
+            soundOn = !soundOn;
+            prefs.edit().putBoolean("sound", soundOn).apply();
+            play(sClick);
+            buildDrawer(1);
+        });
+        String city = prefs.getString("w_city", null);
+        drawerRow(i++, "🌤️", "Città del meteo", city != null ? city : "Non impostata", () -> {
+            closeDrawerNow();
+            askCity();
+        });
+
+        drawerSection("Continua a guardare");
+        final int cwIdx = i;
+        cwRowIdx = i;
+        drawerRow(i++, "🎬", "Fila Continua a guardare", cwOn ? "Attiva" : "Spenta", () -> {
+            setWatchNextOn(!cwOn);
+            buildDrawer(cwIdx);
+        });
+        if (cwOn && WatchNext.supported() && !WatchNext.granted(this)) {
+            drawerRow(i++, "🔒", "Consenti la lettura degli Elenchi TV", "Serve per mostrare la fila", () -> {
+                closeDrawerNow();
+                askWatchNextPermission();
+            });
+        }
+        if (cwOn) {
+            final Set<String> off = new HashSet<>(prefs.getStringSet("cw_off_apps", Collections.<String>emptySet()));
+            Set<String> pkgs = new java.util.LinkedHashSet<>(cwApps);
+            pkgs.addAll(off);
+            List<String> sorted = new ArrayList<>(pkgs);
+            Collections.sort(sorted, (x, y) -> appName(x).compareToIgnoreCase(appName(y)));
+            if (sorted.isEmpty() && WatchNext.granted(this)) {
+                TextView none = text(13, 0xFF8A93A3);
+                none.setText("Nessuna app ha ancora scritto nella fila.");
+                none.setPadding(dp(4), 0, 0, dp(10));
+                drawerList.addView(none);
+            }
+            for (final String pkg : sorted) {
+                final boolean shown = !off.contains(pkg);
+                final int idx = i;
+                drawerRow(i++, shown ? "✅" : "⛔", appName(pkg), shown ? "Titoli mostrati" : "Titoli nascosti",
+                        () -> {
+                            Set<String> o = new HashSet<>(prefs.getStringSet("cw_off_apps", Collections.<String>emptySet()));
+                            if (!o.remove(pkg)) o.add(pkg);
+                            prefs.edit().putStringSet("cw_off_apps", o).apply();
+                            cwSignature = "";
+                            loadWatchNext();
+                            buildDrawer(idx);
+                        });
+            }
+            int hiddenCount = prefs.getStringSet("cw_hidden", Collections.<String>emptySet()).size();
+            if (hiddenCount > 0) {
+                drawerRow(i++, "↩️", "Mostra di nuovo i titoli nascosti",
+                        hiddenCount == 1 ? "1 titolo" : hiddenCount + " titoli", () -> {
+                            prefs.edit().remove("cw_hidden").apply();
+                            cwSignature = "";
+                            loadWatchNext();
+                            toast("Titoli nascosti di nuovo visibili");
+                            buildDrawer(cwIdx);
+                        });
+            }
+        }
+
+        if (keepIdx >= 0) {
+            final int k = keepIdx;
+            drawerList.post(() -> {
+                View v = drawerList.findViewWithTag(k);
+                if (v == null) v = findFocusableIn(drawerList);
+                if (v != null) v.requestFocus();
+            });
+        }
+    }
+
+    private String appName(String pkg) {
+        AppItem a = apps.get(pkg);
+        if (a != null) return a.label.toString();
+        try {
+            PackageManager pm = getPackageManager();
+            return pm.getApplicationLabel(pm.getApplicationInfo(pkg, 0)).toString();
+        } catch (Exception e) {
+            return pkg;
+        }
+    }
+
+    private void drawerSection(String title) {
+        TextView t = text(13, 0xFF8A93A3);
+        t.setText(title.toUpperCase(Locale.ITALIAN));
+        t.setLetterSpacing(0.08f);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, -2);
+        lp.topMargin = drawerList.getChildCount() > 0 ? dp(14) : 0;
+        lp.bottomMargin = dp(8);
+        lp.leftMargin = dp(4);
+        drawerList.addView(t, lp);
+    }
+
+    private void drawerRow(int idx, String icon, String title, String detail, final Runnable action) {
+        LinearLayout row = new LinearLayout(this);
+        row.setOrientation(LinearLayout.HORIZONTAL);
+        row.setGravity(Gravity.CENTER_VERTICAL);
+        row.setPadding(dp(14), dp(10), dp(14), dp(10));
+        style3d(row, GREY, dp(14));
+        row.setTag(idx);
+
+        TextView ic = text(18, Color.WHITE);
+        ic.setText(icon);
+        ic.setIncludeFontPadding(false);
+        row.addView(ic, new LinearLayout.LayoutParams(dp(34), -2));
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        TextView t1 = text(16, Color.WHITE);
+        t1.setText(title);
+        t1.setSingleLine(true);
+        t1.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        texts.addView(t1);
+        if (detail != null) {
+            TextView t2 = text(12, 0xFFB4BCCB);
+            t2.setText(detail);
+            t2.setSingleLine(true);
+            t2.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            texts.addView(t2);
+        }
+        row.addView(texts, new LinearLayout.LayoutParams(0, -2, 1));
+
+        row.setOnClickListener(v -> {
+            play(sClick);
+            action.run();
+        });
+        row.setOnLongClickListener(v -> true);
+        LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-1, -2);
+        lp.bottomMargin = dp(10);
+        drawerList.addView(row, lp);
     }
 
     /** "2026-10-30T06:41" -> minuti dalla mezzanotte */

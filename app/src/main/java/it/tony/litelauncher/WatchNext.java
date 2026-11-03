@@ -27,7 +27,7 @@ import java.util.Set;
 final class WatchNext {
 
     static final String PERMISSION = "android.permission.READ_TV_LISTINGS";
-    static final int MAX = 12;
+    static final int MAX = 40;
 
     static final class Item {
         String key;        // per nasconderlo: pacchetto + id interno (o titolo)
