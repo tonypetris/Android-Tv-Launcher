@@ -1,8 +1,9 @@
 # Lite Launcher per Android TV
 
 Launcher minimale per Philips 50PUS8556/12 (e qualsiasi Android TV):
-una sola schermata con orologio, data, pulsante Impostazioni e la griglia delle app.
-Niente raccomandazioni, niente righe di contenuti, niente servizi in background, nessuna libreria esterna.
+una sola schermata con paesaggio che segue l'ora, orologio, meteo, preferiti, dock delle cartelle,
+Spegni e Riavvia. In alto a destra la fila **Continua a guardare** riprende film e serie da dove li hai lasciati
+(Netflix, YouTube, Prime Video e le altre app che la usano). Niente pubblicità, nessuna libreria esterna.
 
 ## Comandi sul telecomando
 - **OK**: apre l'app
@@ -24,6 +25,15 @@ In alternativa: apri la cartella con Android Studio → Build → Build APK.
 adb connect IP_DEL_TV:5555
 adb install app-release.apk
 ```
+
+### Permesso per «Continua a guardare»
+Al primo avvio il TV chiede di consentire l'accesso agli «Elenchi TV»: rispondi Consenti.
+Oppure concedilo da ADB:
+```
+adb shell pm grant it.tony.litelauncher android.permission.READ_TV_LISTINGS
+```
+Tieni premuto OK su un titolo per riprenderlo, aprire l'app o nasconderlo. La fila si spegne e riaccende
+dal menu ⚙️.
 
 ## 3. Impostarlo come Home
 Prova prima così:

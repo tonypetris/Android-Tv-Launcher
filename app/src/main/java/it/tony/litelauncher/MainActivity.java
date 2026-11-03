@@ -14,6 +14,7 @@ import android.content.SharedPreferences;
 import android.content.pm.ActivityInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.ResolveInfo;
+import android.database.ContentObserver;
 import android.graphics.Bitmap;
 import android.graphics.BitmapShader;
 import android.graphics.Canvas;
@@ -36,6 +37,7 @@ import android.graphics.drawable.GradientDrawable;
 import android.graphics.drawable.LayerDrawable;
 import android.graphics.drawable.StateListDrawable;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
@@ -52,6 +54,7 @@ import android.view.animation.AccelerateInterpolator;
 import android.view.animation.DecelerateInterpolator;
 import android.widget.EditText;
 import android.widget.FrameLayout;
+import android.widget.HorizontalScrollView;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
@@ -76,6 +79,7 @@ import java.util.Collections;
 import java.util.Date;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -189,6 +193,23 @@ public class MainActivity extends Activity {
     private boolean soundOn = true;
     private long muteTicksUntil = 0;
 
+    // fila "Continua a guardare"
+    private static final int REQ_TV_LISTINGS = 7;
+    private final ExecutorService images = Executors.newFixedThreadPool(2);
+    private final Map<String, Drawable> imageCache = new LinkedHashMap<String, Drawable>(32, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(Map.Entry<String, Drawable> e) {
+            return size() > 30;
+        }
+    };
+    private TextView cwLabel;
+    private HorizontalScrollView cwScroll;
+    private LinearLayout cwBox;
+    private String cwSignature = "";
+    private boolean cwOn = true;
+    private final Runnable cwReload = this::loadWatchNext;
+    private ContentObserver cwObserver;
+
     private int openIdx = -1;
     private View openFrom;
     private boolean firstBuild = true;
@@ -217,6 +238,7 @@ public class MainActivity extends Activity {
         super.onCreate(savedInstanceState);
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
         soundOn = prefs.getBoolean("sound", true);
+        cwOn = prefs.getBoolean("cw_on", true);
         loadFolders();
         loadFavs();
         buildUi();
@@ -239,11 +261,13 @@ public class MainActivity extends Activity {
         muteTicks(600);
         handler.removeCallbacks(tick);
         handler.post(tick);
+        startWatchNext();
     }
 
     @Override
     protected void onPause() {
         handler.removeCallbacks(tick);
+        stopWatchNext();
         super.onPause();
     }
 
@@ -255,6 +279,7 @@ public class MainActivity extends Activity {
         }
         loader.shutdownNow();
         net.shutdownNow();
+        images.shutdownNow();
         for (AudioTrack t : new AudioTrack[]{sTick, sClick, sOpen, sClose}) {
             if (t != null) t.release();
         }
@@ -355,10 +380,42 @@ public class MainActivity extends Activity {
         });
         left.addView(time, new LinearLayout.LayoutParams(-2, -2));
 
+        // colonna destra: icone rotonde e, sotto, la fila "Continua a guardare"
+        LinearLayout right = new LinearLayout(this);
+        right.setOrientation(LinearLayout.VERTICAL);
+        right.setGravity(Gravity.END);
+        right.setClipChildren(false);
+        right.setClipToPadding(false);
+        header.addView(right, new LinearLayout.LayoutParams(dp(392), -2));
+
         LinearLayout icons = new LinearLayout(this);
         icons.setOrientation(LinearLayout.HORIZONTAL);
         icons.setClipChildren(false);
-        header.addView(icons, new LinearLayout.LayoutParams(-2, -2));
+        right.addView(icons, new LinearLayout.LayoutParams(-2, -2));
+
+        cwLabel = text(15, 0xF2FFFFFF);
+        cwLabel.setText("Continua a guardare");
+        shadow(cwLabel);
+        cwLabel.setVisibility(View.GONE);
+        LinearLayout.LayoutParams cllp = new LinearLayout.LayoutParams(-1, -2);
+        cllp.topMargin = dp(16);
+        cllp.leftMargin = dp(16);
+        cllp.bottomMargin = dp(8);
+        right.addView(cwLabel, cllp);
+
+        cwScroll = new HorizontalScrollView(this);
+        cwScroll.setHorizontalScrollBarEnabled(false);
+        cwScroll.setHorizontalFadingEdgeEnabled(false);
+        cwScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        cwScroll.setClipChildren(false);
+        cwScroll.setClipToPadding(false);
+        cwScroll.setPadding(dp(16), 0, dp(12), 0);
+        cwScroll.setVisibility(View.GONE);
+        cwBox = new LinearLayout(this);
+        cwBox.setOrientation(LinearLayout.HORIZONTAL);
+        cwBox.setClipChildren(false);
+        cwScroll.addView(cwBox, new FrameLayout.LayoutParams(-2, -2));
+        right.addView(cwScroll, new LinearLayout.LayoutParams(-1, -2));
 
         icons.addView(roundBtn(iconText("📺", 20), v -> launchTv()));
         icons.addView(roundBtn(iconText("☰", 22), v -> showAllApps()));
@@ -1177,6 +1234,7 @@ public class MainActivity extends Activity {
                 addNewKnownApps();
                 buildFolders();
                 refreshOpenPanel();
+                loadWatchNext();
             });
         });
     }
@@ -1501,12 +1559,15 @@ public class MainActivity extends Activity {
     }
 
     private void showLauncherMenu() {
-        String[] opts = {
+        boolean hasHidden = !prefs.getStringSet("cw_hidden", Collections.<String>emptySet()).isEmpty();
+        List<String> opts = new ArrayList<>(Arrays.asList(
                 "Impostazioni del TV",
                 soundOn ? "Suoni del launcher: attivi (premi per spegnere)" : "Suoni del launcher: spenti (premi per accendere)",
-                "Cambia città del meteo"
-        };
-        dialog().setTitle("Lite Launcher").setItems(opts, (d, w) -> {
+                "Cambia città del meteo",
+                cwOn ? "Fila Continua a guardare: attiva (premi per spegnere)"
+                        : "Fila Continua a guardare: spenta (premi per accendere)"));
+        if (hasHidden) opts.add("Mostra di nuovo i titoli nascosti");
+        dialog().setTitle("Lite Launcher").setItems(opts.toArray(new String[0]), (d, w) -> {
             if (w == 0) {
                 safeStart(new Intent(Settings.ACTION_SETTINGS));
             } else if (w == 1) {
@@ -1514,8 +1575,272 @@ public class MainActivity extends Activity {
                 prefs.edit().putBoolean("sound", soundOn).apply();
                 play(sClick);
                 toast(soundOn ? "Suoni attivi" : "Suoni spenti");
-            } else {
+            } else if (w == 2) {
                 askCity();
+            } else if (w == 3) {
+                setWatchNextOn(!cwOn);
+            } else {
+                prefs.edit().remove("cw_hidden").apply();
+                cwSignature = "";
+                loadWatchNext();
+                toast("Titoli nascosti di nuovo visibili");
+            }
+        }).show();
+    }
+
+
+    // ------------------------------------------------------------------ continua a guardare
+
+    private void startWatchNext() {
+        if (!cwOn || !WatchNext.supported()) {
+            showWatchNext(null);
+            return;
+        }
+        if (!WatchNext.granted(this)) {
+            showWatchNext(null);
+            // lo chiedo una volta sola; poi si riattiva dal menu ⚙️
+            if (!prefs.getBoolean("cw_asked", false)) askWatchNextPermission();
+            return;
+        }
+        if (cwObserver == null) {
+            cwObserver = new ContentObserver(handler) {
+                @Override
+                public void onChange(boolean selfChange) {
+                    handler.removeCallbacks(cwReload);
+                    handler.postDelayed(cwReload, 800);
+                }
+            };
+            try {
+                getContentResolver().registerContentObserver(WatchNext.uri(), true, cwObserver);
+            } catch (Exception ignored) {
+                cwObserver = null;
+            }
+        }
+        loadWatchNext();
+    }
+
+    private void stopWatchNext() {
+        handler.removeCallbacks(cwReload);
+        if (cwObserver != null) {
+            try {
+                getContentResolver().unregisterContentObserver(cwObserver);
+            } catch (Exception ignored) {
+            }
+            cwObserver = null;
+        }
+    }
+
+    private void setWatchNextOn(boolean on) {
+        cwOn = on;
+        prefs.edit().putBoolean("cw_on", on).apply();
+        if (!on) {
+            stopWatchNext();
+            showWatchNext(null);
+            toast("Fila Continua a guardare spenta");
+        } else if (!WatchNext.supported()) {
+            toast("Questo TV non ha la fila Continua a guardare");
+        } else if (!WatchNext.granted(this)) {
+            askWatchNextPermission();
+        } else {
+            startWatchNext();
+            toast("Fila Continua a guardare attiva");
+        }
+    }
+
+    private void askWatchNextPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) return;
+        boolean askedBefore = prefs.getBoolean("cw_asked", false);
+        prefs.edit().putBoolean("cw_asked", true).apply();
+        if (askedBefore && !shouldShowRequestPermissionRationale(WatchNext.PERMISSION)) {
+            // rifiutato in modo definitivo: si concede dalle impostazioni dell'app
+            toast("Consenti «Elenchi TV» nei permessi di Lite Launcher");
+            safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    Uri.parse("package:" + getPackageName())).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            return;
+        }
+        try {
+            requestPermissions(new String[]{WatchNext.PERMISSION}, REQ_TV_LISTINGS);
+        } catch (Exception ignored) {
+        }
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] results) {
+        super.onRequestPermissionsResult(requestCode, permissions, results);
+        if (requestCode != REQ_TV_LISTINGS) return;
+        if (results.length > 0 && results[0] == PackageManager.PERMISSION_GRANTED) {
+            startWatchNext();
+        } else {
+            toast("Senza questo permesso la fila Continua a guardare resta nascosta");
+        }
+    }
+
+    private void loadWatchNext() {
+        if (!cwOn || !WatchNext.granted(this)) {
+            showWatchNext(null);
+            return;
+        }
+        final Set<String> installed = new HashSet<>(apps.keySet());
+        final Set<String> hidden = new HashSet<>(prefs.getStringSet("cw_hidden", Collections.<String>emptySet()));
+        loader.execute(() -> {
+            final List<WatchNext.Item> list = WatchNext.load(this, installed, hidden);
+            runOnUiThread(() -> {
+                if (!isFinishing() && !isDestroyed()) showWatchNext(list);
+            });
+        });
+    }
+
+    private void showWatchNext(List<WatchNext.Item> list) {
+        if (cwBox == null) return;
+        if (list == null) list = new ArrayList<>();
+        StringBuilder sig = new StringBuilder();
+        for (WatchNext.Item it : list) {
+            sig.append(it.key).append('/').append(Math.round(it.progress * 50)).append('/').append(it.image).append(';');
+        }
+        if (sig.toString().equals(cwSignature)) return;
+        cwSignature = sig.toString();
+
+        String focusedKey = null;
+        View f = getCurrentFocus();
+        if (f != null && f.getParent() == cwBox && f.getTag() instanceof String) focusedKey = (String) f.getTag();
+
+        muteTicks(300);
+        cwBox.removeAllViews();
+        int vis = list.isEmpty() ? View.GONE : View.VISIBLE;
+        cwLabel.setVisibility(vis);
+        cwScroll.setVisibility(vis);
+
+        int w = dp(168), h = dp(95);
+        View toFocus = null;
+        for (int i = 0; i < list.size(); i++) {
+            View card = watchCard(list.get(i), w, h);
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(w, h);
+            if (i > 0) lp.leftMargin = dp(16);
+            cwBox.addView(card, lp);
+            if (("cw:" + list.get(i).key).equals(focusedKey)) toFocus = card;
+        }
+        if (toFocus != null) {
+            toFocus.requestFocus();
+        } else if (focusedKey != null && cwBox.getChildCount() > 0) {
+            cwBox.getChildAt(0).requestFocus();
+        } else if (focusedKey != null && !folders.isEmpty()) {
+            focusFolder(0);
+        }
+    }
+
+    /** Scheda: immagine del titolo, nome e episodio in basso, barra di avanzamento. */
+    private View watchCard(final WatchNext.Item it, final int w, final int h) {
+        final FrameLayout card = new FrameLayout(this);
+        style3d(card, GREY, dp(10), false);
+        card.setTag("cw:" + it.key);
+        final AppItem app = apps.get(it.pkg);
+        card.setContentDescription(it.title + (app != null ? ", " + app.label : ""));
+
+        // segnaposto: il banner dell'app finché l'immagine non arriva
+        final ImageView img = new ImageView(this);
+        img.setScaleType(ImageView.ScaleType.FIT_XY);
+        card.addView(img, new FrameLayout.LayoutParams(-1, -1));
+        if (app != null && app.banner) img.setImageDrawable(roundedBanner(app.image, w, h, dp(10)));
+
+        final String cacheKey = it.image + "@" + w;
+        Drawable cached = it.image == null ? null : imageCache.get(cacheKey);
+        if (cached != null) {
+            img.setImageDrawable(cached);
+            card.setBackground(null);
+        } else if (it.image != null) {
+            images.execute(() -> {
+                android.graphics.Bitmap b = WatchNext.loadImage(this, it.image, w, h);
+                if (b == null) return;
+                final Drawable d = roundedBanner(new BitmapDrawable(getResources(), b), w, h, dp(10));
+                runOnUiThread(() -> {
+                    imageCache.put(cacheKey, d);
+                    img.setImageDrawable(d);
+                    card.setBackground(null);
+                });
+            });
+        }
+
+        // sfumatura scura in basso per leggere il testo
+        View shade = new View(this);
+        GradientDrawable g = new GradientDrawable(GradientDrawable.Orientation.BOTTOM_TOP,
+                new int[]{0xE6000000, 0x99000000, 0x00000000});
+        float r = dp(10);
+        g.setCornerRadii(new float[]{0, 0, 0, 0, r, r, r, r});
+        shade.setBackground(g);
+        card.addView(shade, new FrameLayout.LayoutParams(-1, h * 2 / 3, Gravity.BOTTOM));
+
+        LinearLayout texts = new LinearLayout(this);
+        texts.setOrientation(LinearLayout.VERTICAL);
+        texts.setPadding(dp(8), 0, dp(8), it.progress >= 0 ? dp(11) : dp(7));
+        TextView t1 = text(12, Color.WHITE);
+        t1.setText(it.title);
+        t1.setTypeface(Typeface.DEFAULT_BOLD);
+        t1.setSingleLine(true);
+        t1.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        texts.addView(t1);
+        if (it.subtitle != null) {
+            TextView t2 = text(10, 0xD9FFFFFF);
+            t2.setText(it.subtitle);
+            t2.setSingleLine(true);
+            t2.setEllipsize(android.text.TextUtils.TruncateAt.END);
+            texts.addView(t2);
+        }
+        card.addView(texts, new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM));
+
+        if (it.progress >= 0) {
+            FrameLayout track = new FrameLayout(this);
+            GradientDrawable tb = new GradientDrawable();
+            tb.setColor(0x59FFFFFF);
+            tb.setCornerRadius(dp(2));
+            track.setBackground(tb);
+            View bar = new View(this);
+            GradientDrawable bb = new GradientDrawable();
+            bb.setColor(Color.WHITE);
+            bb.setCornerRadius(dp(2));
+            bar.setBackground(bb);
+            int barW = Math.max(dp(4), Math.round((w - dp(16)) * it.progress));
+            track.addView(bar, new FrameLayout.LayoutParams(barW, -1));
+            FrameLayout.LayoutParams tlp = new FrameLayout.LayoutParams(-1, dp(3), Gravity.BOTTOM);
+            tlp.leftMargin = dp(8);
+            tlp.rightMargin = dp(8);
+            tlp.bottomMargin = dp(6);
+            card.addView(track, tlp);
+        }
+
+        card.setOnClickListener(v -> resume(it));
+        card.setOnLongClickListener(v -> {
+            watchOptions(it);
+            return true;
+        });
+        return card;
+    }
+
+    private void resume(WatchNext.Item it) {
+        play(sClick);
+        Intent i = WatchNext.intent(it);
+        if (i != null && safeStart(i)) return;
+        AppItem a = apps.get(it.pkg);
+        if (a != null) launch(a);
+        else toast("Impossibile riprendere " + it.title);
+    }
+
+    private void watchOptions(final WatchNext.Item it) {
+        final AppItem a = apps.get(it.pkg);
+        String[] opts = {"Riprendi", a != null ? "Apri " + a.label : "Apri l'app",
+                "Nascondi questo titolo", "Nascondi la fila Continua a guardare"};
+        dialog().setTitle(it.title).setItems(opts, (d, w) -> {
+            if (w == 0) {
+                resume(it);
+            } else if (w == 1) {
+                if (a != null) launch(a);
+            } else if (w == 2) {
+                Set<String> hidden = new HashSet<>(prefs.getStringSet("cw_hidden", Collections.<String>emptySet()));
+                hidden.add(it.key);
+                prefs.edit().putStringSet("cw_hidden", hidden).apply();
+                loadWatchNext();
+                toast("Nascosto. Lo rimetti dal menu ⚙️");
+            } else {
+                setWatchNextOn(false);
             }
         }).show();
     }
