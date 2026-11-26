@@ -238,8 +238,7 @@ public class MainActivity extends Activity {
     private int idleMin = 5;
     private boolean idle = false;
     private View dimView;
-    private View clockCol;
-    private View rightCol;
+    private View idleLayer;
     private final Runnable idleRun = this::enterIdle;
 
     private int openIdx = -1;
@@ -334,6 +333,13 @@ public class MainActivity extends Activity {
     @Override
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
+        if (intent != null && intent.getBooleanExtra("quadro", false)) {
+            // prova da ADB: am start -n it.tony.litelauncher/.MainActivity --ez quadro true
+            if (drawerOpen) closeDrawerNow();
+            if (openIdx >= 0) closeFolder(false);
+            startIdleNow();
+            return;
+        }
         // Tasto Home: chiude menu e cartella aperti e torna alla prima cartella
         if (idle) exitIdle(false);
         if (drawerOpen) closeDrawerNow();
@@ -356,7 +362,10 @@ public class MainActivity extends Activity {
     public boolean dispatchKeyEvent(KeyEvent e) {
         if (idle) {
             // il primo tasto risveglia soltanto, non apre niente
-            if (e.getAction() == KeyEvent.ACTION_DOWN) exitIdle(true);
+            if (e.getAction() == KeyEvent.ACTION_DOWN) {
+                android.util.Log.i("LiteLauncher", "quadro: tasto " + e.getKeyCode());
+                exitIdle(true);
+            }
             return true;
         }
         return super.dispatchKeyEvent(e);
@@ -415,7 +424,6 @@ public class MainActivity extends Activity {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         header.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
-        clockCol = left;
 
         LinearLayout dateRow = new LinearLayout(this);
         dateRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -465,7 +473,6 @@ public class MainActivity extends Activity {
         right.setClipChildren(false);
         right.setClipToPadding(false);
         header.addView(right, new LinearLayout.LayoutParams(dp(392), -2));
-        rightCol = right;
 
         LinearLayout icons = new LinearLayout(this);
         icons.setOrientation(LinearLayout.HORIZONTAL);
@@ -560,6 +567,39 @@ public class MainActivity extends Activity {
         LinearLayout.LayoutParams dlp = new LinearLayout.LayoutParams(-1, dp(74));
         dlp.topMargin = dp(24);
         content.addView(foldersBox, dlp);
+
+        // --- modalità quadro: data e orologio grande al centro, sopra il paesaggio
+        LinearLayout il = new LinearLayout(this);
+        il.setOrientation(LinearLayout.VERTICAL);
+        il.setGravity(Gravity.CENTER);
+        il.setVisibility(View.GONE);
+        il.setAlpha(0f);
+        TextClock idate = new TextClock(this);
+        idate.setFormat24Hour("EEEE d MMMM");
+        idate.setFormat12Hour("EEEE d MMMM");
+        idate.setTextColor(0xF2FFFFFF);
+        idate.setTextSize(TypedValue.COMPLEX_UNIT_SP, 24);
+        shadow(idate);
+        il.addView(idate, new LinearLayout.LayoutParams(-2, -2));
+        TextClock itime = new TextClock(this);
+        itime.setFormat24Hour("HH:mm");
+        itime.setFormat12Hour("HH:mm");
+        itime.setTextColor(Color.WHITE);
+        itime.setTextSize(TypedValue.COMPLEX_UNIT_SP, 200);
+        itime.setTypeface(Typeface.create("sans-serif-thin", Typeface.NORMAL));
+        itime.setIncludeFontPadding(false);
+        itime.setLetterSpacing(-0.02f);
+        itime.addOnLayoutChangeListener((v, l, t, r, b, ol, ot, or, ob) -> {
+            int hgt = b - t;
+            if (hgt > 0) {
+                ((TextView) v).getPaint().setShader(new LinearGradient(0, 0, 0, hgt,
+                        0xF5FFFFFF, 0x66FFFFFF, Shader.TileMode.CLAMP));
+                v.invalidate();
+            }
+        });
+        il.addView(itime, new LinearLayout.LayoutParams(-2, -2));
+        idleLayer = il;
+        root.addView(il, new FrameLayout.LayoutParams(-1, -1));
 
         // --- sovrapposizione cartella aperta
         overlay = new FrameLayout(this);
@@ -1900,31 +1940,35 @@ public class MainActivity extends Activity {
     }
 
     private void enterIdle() {
-        if (idle || idleMin <= 0 && !forceIdle) return;
+        if (idle || (idleMin <= 0 && !forceIdle)) return;
         // non mentre è aperto un menu, una cartella o una finestra di dialogo
         if (!hasWindowFocus() || drawerOpen || openIdx >= 0) {
+            android.util.Log.i("LiteLauncher", "quadro rimandato: focus=" + hasWindowFocus()
+                    + " menu=" + drawerOpen + " cartella=" + openIdx);
+            forceIdle = false;
             scheduleIdle();
             return;
         }
+        android.util.Log.i("LiteLauncher", "quadro: entro");
         forceIdle = false;
         idle = true;
         muteTicks(800);
-        for (View v : new View[]{rightCol, recRow, favLabel, favBox, foldersBox, edgeTab}) {
-            if (v != null) v.animate().alpha(0f).setDuration(900).start();
-        }
-        // l'orologio scivola al centro e si ingrandisce
-        int[] loc = new int[2];
-        clockCol.getLocationOnScreen(loc);
-        float sw = getResources().getDisplayMetrics().widthPixels;
-        float sh = getResources().getDisplayMetrics().heightPixels;
-        float dx = sw / 2f - (loc[0] + clockCol.getWidth() / 2f);
-        float dy = sh / 2f - (loc[1] + clockCol.getHeight() / 2f);
-        clockCol.setPivotX(clockCol.getWidth() / 2f);
-        clockCol.setPivotY(clockCol.getHeight() / 2f);
-        clockCol.animate().translationX(dx).translationY(dy).scaleX(1.25f).scaleY(1.25f)
-                .setDuration(1200).setInterpolator(new DecelerateInterpolator(1.5f)).start();
+        content.animate().cancel();
+        content.animate().alpha(0f).setDuration(800)
+                .withEndAction(() -> {
+                    if (idle) content.setVisibility(View.INVISIBLE);
+                }).start();
+        edgeTab.animate().cancel();
+        edgeTab.animate().alpha(0f).setDuration(800).start();
+        idleLayer.setVisibility(View.VISIBLE);
+        idleLayer.animate().cancel();
+        idleLayer.setScaleX(0.96f);
+        idleLayer.setScaleY(0.96f);
+        idleLayer.animate().alpha(1f).scaleX(1f).scaleY(1f).setStartDelay(300).setDuration(1200)
+                .setInterpolator(new DecelerateInterpolator(1.5f)).start();
         int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         float dim = (h >= 22 || h < 7) ? 0.55f : (h >= 19 ? 0.35f : 0.15f);
+        dimView.animate().cancel();
         dimView.animate().alpha(dim).setDuration(1500).start();
     }
 
@@ -1933,21 +1977,24 @@ public class MainActivity extends Activity {
     private void startIdleNow() {
         forceIdle = true;
         handler.removeCallbacks(idleRun);
-        handler.postDelayed(idleRun, 600);
+        handler.postDelayed(idleRun, 700);
     }
 
     private void exitIdle(boolean animate) {
         if (!idle) return;
+        android.util.Log.i("LiteLauncher", "quadro: esco");
         idle = false;
         long d = animate ? 350 : 0;
-        for (View v : new View[]{rightCol, recRow, favLabel, favBox, foldersBox, edgeTab}) {
-            if (v != null) {
-                v.animate().cancel();
-                v.animate().alpha(1f).setDuration(d).start();
-            }
-        }
-        clockCol.animate().cancel();
-        clockCol.animate().translationX(0).translationY(0).scaleX(1f).scaleY(1f).setDuration(d).start();
+        content.animate().cancel();
+        content.setVisibility(View.VISIBLE);
+        content.animate().alpha(1f).setDuration(d).start();
+        edgeTab.animate().cancel();
+        edgeTab.animate().alpha(1f).setDuration(d).start();
+        idleLayer.animate().cancel();
+        idleLayer.animate().alpha(0f).setStartDelay(0).setDuration(d)
+                .withEndAction(() -> {
+                    if (!idle) idleLayer.setVisibility(View.GONE);
+                }).start();
         dimView.animate().cancel();
         dimView.animate().alpha(0f).setDuration(d).start();
         scheduleIdle();
