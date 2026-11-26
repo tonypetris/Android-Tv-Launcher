@@ -28,6 +28,7 @@ import android.graphics.Shader;
 import android.media.AudioAttributes;
 import android.media.AudioFormat;
 import android.media.AudioTrack;
+import android.media.tv.TvInputManager;
 import android.graphics.Outline;
 import android.graphics.Typeface;
 import android.graphics.drawable.BitmapDrawable;
@@ -156,13 +157,15 @@ public class MainActivity extends Activity {
         final Drawable image;
         final boolean banner;
         final Intent launch;
+        final Drawable icon;   // icona piccola (per la fila Recenti)
 
-        AppItem(String pkg, CharSequence label, Drawable image, boolean banner, Intent launch) {
+        AppItem(String pkg, CharSequence label, Drawable image, boolean banner, Intent launch, Drawable icon) {
             this.pkg = pkg;
             this.label = label;
             this.image = image;
             this.banner = banner;
             this.launch = launch;
+            this.icon = icon != null ? icon : image;
         }
     }
 
@@ -222,6 +225,23 @@ public class MainActivity extends Activity {
     private boolean drawerOpen = false;
     private int cwRowIdx = 3;
 
+    // ingressi: si ricaricano quando un dispositivo viene collegato o rinominato
+    private TvInputManager.TvInputCallback inputCallback;
+
+    // fila "Recenti"
+    private static final int MAX_RECENT = 6;
+    private LinearLayout recRow;
+    private LinearLayout recBox;
+    private boolean recOn = true;
+
+    // modalità quadro: dopo qualche minuto senza tasti restano solo paesaggio e orologio
+    private int idleMin = 5;
+    private boolean idle = false;
+    private View dimView;
+    private View clockCol;
+    private View rightCol;
+    private final Runnable idleRun = this::enterIdle;
+
     private int openIdx = -1;
     private View openFrom;
     private boolean firstBuild = true;
@@ -251,6 +271,8 @@ public class MainActivity extends Activity {
         prefs = getSharedPreferences("launcher", MODE_PRIVATE);
         soundOn = prefs.getBoolean("sound", true);
         cwOn = prefs.getBoolean("cw_on", true);
+        recOn = prefs.getBoolean("rec_on", true);
+        idleMin = prefs.getInt("idle_min", 5);
         loadFolders();
         loadFavs();
         buildUi();
@@ -263,6 +285,7 @@ public class MainActivity extends Activity {
         filter.addAction(Intent.ACTION_PACKAGE_REPLACED);
         filter.addDataScheme("package");
         registerReceiver(packageReceiver, filter);
+        registerInputCallback();
 
         reloadApps();
     }
@@ -274,12 +297,16 @@ public class MainActivity extends Activity {
         handler.removeCallbacks(tick);
         handler.post(tick);
         startWatchNext();
+        buildRecents();
+        scheduleIdle();
     }
 
     @Override
     protected void onPause() {
         handler.removeCallbacks(tick);
         stopWatchNext();
+        handler.removeCallbacks(idleRun);
+        if (idle) exitIdle(false);
         super.onPause();
     }
 
@@ -288,6 +315,12 @@ public class MainActivity extends Activity {
         try {
             unregisterReceiver(packageReceiver);
         } catch (IllegalArgumentException ignored) {
+        }
+        if (inputCallback != null) {
+            try {
+                ((TvInputManager) getSystemService(TV_INPUT_SERVICE)).unregisterCallback(inputCallback);
+            } catch (Throwable ignored) {
+            }
         }
         loader.shutdownNow();
         net.shutdownNow();
@@ -302,9 +335,11 @@ public class MainActivity extends Activity {
     protected void onNewIntent(Intent intent) {
         super.onNewIntent(intent);
         // Tasto Home: chiude menu e cartella aperti e torna alla prima cartella
+        if (idle) exitIdle(false);
         if (drawerOpen) closeDrawerNow();
         if (openIdx >= 0) closeFolder(false);
         if (foldersBox.getChildCount() > 0) focusFolder(0);
+        scheduleIdle();
     }
 
     @Override
@@ -315,6 +350,22 @@ public class MainActivity extends Activity {
         }
         if (openIdx >= 0) closeFolder(true);
         // altrimenti niente: siamo la Home
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(KeyEvent e) {
+        if (idle) {
+            // il primo tasto risveglia soltanto, non apre niente
+            if (e.getAction() == KeyEvent.ACTION_DOWN) exitIdle(true);
+            return true;
+        }
+        return super.dispatchKeyEvent(e);
+    }
+
+    @Override
+    public void onUserInteraction() {
+        super.onUserInteraction();
+        if (!idle) scheduleIdle();
     }
 
     @Override
@@ -341,6 +392,11 @@ public class MainActivity extends Activity {
         sky = new SkyView(this);
         sky.setSun(prefs.getInt("sr", 7 * 60), prefs.getInt("ss", 18 * 60));
         root.addView(sky, new FrameLayout.LayoutParams(-1, -1));
+        // velo scuro della modalità quadro (più scuro la sera)
+        dimView = new View(this);
+        dimView.setBackgroundColor(Color.BLACK);
+        dimView.setAlpha(0f);
+        root.addView(dimView, new FrameLayout.LayoutParams(-1, -1));
 
         content = new LinearLayout(this);
         content.setOrientation(LinearLayout.VERTICAL);
@@ -359,6 +415,7 @@ public class MainActivity extends Activity {
         LinearLayout left = new LinearLayout(this);
         left.setOrientation(LinearLayout.VERTICAL);
         header.addView(left, new LinearLayout.LayoutParams(0, -2, 1));
+        clockCol = left;
 
         LinearLayout dateRow = new LinearLayout(this);
         dateRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -408,6 +465,7 @@ public class MainActivity extends Activity {
         right.setClipChildren(false);
         right.setClipToPadding(false);
         header.addView(right, new LinearLayout.LayoutParams(dp(392), -2));
+        rightCol = right;
 
         LinearLayout icons = new LinearLayout(this);
         icons.setOrientation(LinearLayout.HORIZONTAL);
@@ -449,6 +507,37 @@ public class MainActivity extends Activity {
         icons.addView(roundBtn(iconText("⚙️", 20), v -> openDrawer(false)));
 
         content.addView(new View(this), new LinearLayout.LayoutParams(-1, 0, 1));
+
+        // --- recenti: una riga compatta di pulsanti sopra i preferiti
+        recRow = new LinearLayout(this);
+        recRow.setOrientation(LinearLayout.HORIZONTAL);
+        recRow.setGravity(Gravity.CENTER_VERTICAL);
+        recRow.setClipChildren(false);
+        recRow.setVisibility(View.GONE);
+        TextView recLabel = text(15, 0xF2FFFFFF);
+        recLabel.setText("Recenti");
+        shadow(recLabel);
+        LinearLayout.LayoutParams rllp = new LinearLayout.LayoutParams(-2, -2);
+        rllp.leftMargin = dp(4);
+        rllp.rightMargin = dp(4);
+        recRow.addView(recLabel, rllp);
+        HorizontalScrollView recScroll = new HorizontalScrollView(this);
+        recScroll.setHorizontalScrollBarEnabled(false);
+        recScroll.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        recScroll.setClipChildren(false);
+        recScroll.setClipToPadding(false);
+        recScroll.setPadding(dp(8), dp(6), dp(8), dp(6));
+        recBox = new LinearLayout(this);
+        recBox.setOrientation(LinearLayout.HORIZONTAL);
+        recBox.setClipChildren(false);
+        recScroll.addView(recBox, new FrameLayout.LayoutParams(-2, -2));
+        FrameLayout recClip = new FrameLayout(this);
+        recClip.setClipChildren(true);
+        recClip.addView(recScroll, new FrameLayout.LayoutParams(-1, -2));
+        recRow.addView(recClip, new LinearLayout.LayoutParams(0, -2, 1));
+        LinearLayout.LayoutParams rrlp = new LinearLayout.LayoutParams(-1, -2);
+        rrlp.bottomMargin = dp(8);
+        content.addView(recRow, rrlp);
 
         // --- preferiti
         favLabel = text(15, 0xF2FFFFFF);
@@ -777,8 +866,9 @@ public class MainActivity extends Activity {
             if (w == 0) toggleFav(a.pkg);
             else if (w == 1) moveFav(a.pkg, -1);
             else if (w == 2) moveFav(a.pkg, 1);
-            else safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+            else if (!Inputs.isInput(a.pkg)) safeStart(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.parse("package:" + a.pkg)).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
+            else safeStart(new Intent(Settings.ACTION_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK));
         }).show();
     }
 
@@ -1303,8 +1393,13 @@ public class MainActivity extends Activity {
             Map<String, AppItem> map = new HashMap<>();
             collect(pm, Intent.CATEGORY_LEANBACK_LAUNCHER, map, self);
             collect(pm, Intent.CATEGORY_LAUNCHER, map, self);
+            // ingressi HDMI & co. come "app": preferiti e cartelle li trattano allo stesso modo
+            for (Inputs.Input in : Inputs.list(this)) {
+                map.put(in.key, new AppItem(in.key, in.label, new Inputs.BadgeDrawable(in.badge, dp(44)),
+                        false, in.intent, new Inputs.BadgeDrawable(in.badge, dp(26))));
+            }
             for (String pkg : extra) {
-                if (map.containsKey(pkg)) continue;
+                if (map.containsKey(pkg) || Inputs.isInput(pkg)) continue;
                 try {
                     Intent li = pm.getLaunchIntentForPackage(pkg);
                     if (li == null) continue;
@@ -1321,6 +1416,7 @@ public class MainActivity extends Activity {
                 buildFolders();
                 refreshOpenPanel();
                 loadWatchNext();
+                buildRecents();
             });
         });
     }
@@ -1344,9 +1440,14 @@ public class MainActivity extends Activity {
         } catch (Exception ignored) {
         }
         boolean banner = img != null;
-        if (img == null) img = ri.loadIcon(pm);
+        Drawable icon = null;
+        try {
+            icon = ri.loadIcon(pm);
+        } catch (Exception ignored) {
+        }
+        if (img == null) img = icon;
         launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK | Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED);
-        return new AppItem(ai.packageName, ri.loadLabel(pm), img, banner, launch);
+        return new AppItem(ai.packageName, ri.loadLabel(pm), img, banner, launch, icon);
     }
 
     /** Le app appena installate che conosco finiscono da sole nella cartella giusta. */
@@ -1356,6 +1457,14 @@ public class MainActivity extends Activity {
         for (String pkg : apps.keySet()) {
             if (!seen.add(pkg)) continue;
             changed = true;
+            AppItem ai = apps.get(pkg);
+            if (Inputs.isInput(pkg) && ai != null && ai.image instanceof Inputs.BadgeDrawable
+                    && pkg.contains("HDMI")) {
+                for (Folder f : folders) {
+                    if ("tv".equals(f.key) && !f.apps.contains(pkg)) f.apps.add(pkg);
+                }
+                continue;
+            }
             for (Object[] d : DEFAULTS) {
                 if (!Arrays.asList((String[]) d[4]).contains(pkg)) continue;
                 for (Folder f : folders) {
@@ -1386,6 +1495,11 @@ public class MainActivity extends Activity {
 
     private void launch(AppItem a) {
         play(sClick);
+        pushRecent(a.pkg);
+        if (Inputs.isInput(a.pkg)) {
+            if (!safeStart(a.launch)) launchTv();
+            return;
+        }
         if (!safeStart(a.launch)) {
             Intent li = getPackageManager().getLaunchIntentForPackage(a.pkg);
             if (li == null || !safeStart(li)) toast("Impossibile aprire " + a.label);
@@ -1642,6 +1756,205 @@ public class MainActivity extends Activity {
 
     private void muteTicks(long ms) {
         muteTicksUntil = Math.max(muteTicksUntil, System.currentTimeMillis() + ms);
+    }
+
+
+    // ------------------------------------------------------------------ ingressi
+
+    private void registerInputCallback() {
+        try {
+            TvInputManager tim = (TvInputManager) getSystemService(TV_INPUT_SERVICE);
+            if (tim == null) return;
+            inputCallback = new TvInputManager.TvInputCallback() {
+                @Override
+                public void onInputAdded(String inputId) {
+                    reloadAppsSoon();
+                }
+
+                @Override
+                public void onInputRemoved(String inputId) {
+                    reloadAppsSoon();
+                }
+
+                @Override
+                public void onInputUpdated(String inputId) {
+                    reloadAppsSoon();
+                }
+            };
+            tim.registerCallback(inputCallback, handler);
+        } catch (Throwable ignored) {
+            inputCallback = null;
+        }
+    }
+
+    private final Runnable reloadSoon = this::reloadApps;
+
+    private void reloadAppsSoon() {
+        handler.removeCallbacks(reloadSoon);
+        handler.postDelayed(reloadSoon, 1500);
+    }
+
+    // ------------------------------------------------------------------ recenti
+
+    private List<String> recents() {
+        String raw = prefs.getString("recent", "");
+        List<String> out = new ArrayList<>();
+        if (!raw.isEmpty()) out.addAll(Arrays.asList(raw.split(",")));
+        return out;
+    }
+
+    private void pushRecent(String pkg) {
+        List<String> r = recents();
+        r.remove(pkg);
+        r.add(0, pkg);
+        while (r.size() > 12) r.remove(r.size() - 1);
+        prefs.edit().putString("recent", android.text.TextUtils.join(",", r)).apply();
+    }
+
+    /** Le ultime app aperte, senza quelle che sono già nei preferiti. */
+    private void buildRecents() {
+        if (recBox == null) return;
+        String focused = null;
+        View f = getCurrentFocus();
+        if (f != null && f.getParent() == recBox && f.getTag() instanceof String) focused = (String) f.getTag();
+
+        List<AppItem> list = new ArrayList<>();
+        if (recOn) {
+            for (String p : recents()) {
+                AppItem a = apps.get(p);
+                if (a == null || favs.contains(p)) continue;
+                list.add(a);
+                if (list.size() >= MAX_RECENT) break;
+            }
+        }
+        muteTicks(300);
+        recBox.removeAllViews();
+        recRow.setVisibility(list.isEmpty() ? View.GONE : View.VISIBLE);
+        View toFocus = null;
+        for (int i = 0; i < list.size(); i++) {
+            View chip = recentChip(list.get(i));
+            LinearLayout.LayoutParams lp = new LinearLayout.LayoutParams(-2, dp(42));
+            if (i > 0) lp.leftMargin = dp(12);
+            recBox.addView(chip, lp);
+            if (list.get(i).pkg.equals(focused)) toFocus = chip;
+        }
+        if (toFocus != null) toFocus.requestFocus();
+        else if (focused != null && recBox.getChildCount() > 0) recBox.getChildAt(0).requestFocus();
+        else if (focused != null && !folders.isEmpty()) focusFolder(0);
+    }
+
+    private View recentChip(final AppItem a) {
+        LinearLayout chip = new LinearLayout(this);
+        chip.setOrientation(LinearLayout.HORIZONTAL);
+        chip.setGravity(Gravity.CENTER_VERTICAL);
+        chip.setPadding(dp(10), 0, dp(14), 0);
+        styleGlass(chip, dp(21), 0x141824, false);
+        chip.setTag(a.pkg);
+        chip.setContentDescription(a.label);
+
+        ImageView ic = new ImageView(this);
+        ic.setImageDrawable(a.icon);
+        ic.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        LinearLayout.LayoutParams ilp = new LinearLayout.LayoutParams(dp(26), dp(26));
+        ilp.rightMargin = dp(8);
+        chip.addView(ic, ilp);
+
+        TextView t = text(14, Color.WHITE);
+        t.setText(a.label);
+        t.setSingleLine(true);
+        t.setMaxWidth(dp(150));
+        t.setEllipsize(android.text.TextUtils.TruncateAt.END);
+        chip.addView(t);
+
+        chip.setOnClickListener(v -> launch(a));
+        chip.setOnLongClickListener(v -> {
+            String[] opts = {"Apri", favs.contains(a.pkg) ? "Rimuovi dai preferiti" : "Aggiungi ai preferiti",
+                    "Togli dai recenti", "Svuota i recenti"};
+            dialog().setTitle(a.label).setItems(opts, (d, w) -> {
+                if (w == 0) {
+                    launch(a);
+                } else if (w == 1) {
+                    toggleFav(a.pkg);
+                    buildRecents();
+                } else if (w == 2) {
+                    List<String> r = recents();
+                    r.remove(a.pkg);
+                    prefs.edit().putString("recent", android.text.TextUtils.join(",", r)).apply();
+                    buildRecents();
+                } else {
+                    prefs.edit().remove("recent").apply();
+                    buildRecents();
+                    if (!folders.isEmpty()) focusFolder(0);
+                }
+            }).show();
+            return true;
+        });
+        return chip;
+    }
+
+    // ------------------------------------------------------------------ modalità quadro
+
+    private void scheduleIdle() {
+        handler.removeCallbacks(idleRun);
+        if (idleMin > 0) handler.postDelayed(idleRun, idleMin * 60_000L);
+    }
+
+    private void enterIdle() {
+        if (idle || idleMin <= 0 && !forceIdle) return;
+        // non mentre è aperto un menu, una cartella o una finestra di dialogo
+        if (!hasWindowFocus() || drawerOpen || openIdx >= 0) {
+            scheduleIdle();
+            return;
+        }
+        forceIdle = false;
+        idle = true;
+        muteTicks(800);
+        for (View v : new View[]{rightCol, recRow, favLabel, favBox, foldersBox, edgeTab}) {
+            if (v != null) v.animate().alpha(0f).setDuration(900).start();
+        }
+        // l'orologio scivola al centro e si ingrandisce
+        int[] loc = new int[2];
+        clockCol.getLocationOnScreen(loc);
+        float sw = getResources().getDisplayMetrics().widthPixels;
+        float sh = getResources().getDisplayMetrics().heightPixels;
+        float dx = sw / 2f - (loc[0] + clockCol.getWidth() / 2f);
+        float dy = sh / 2f - (loc[1] + clockCol.getHeight() / 2f);
+        clockCol.setPivotX(clockCol.getWidth() / 2f);
+        clockCol.setPivotY(clockCol.getHeight() / 2f);
+        clockCol.animate().translationX(dx).translationY(dy).scaleX(1.25f).scaleY(1.25f)
+                .setDuration(1200).setInterpolator(new DecelerateInterpolator(1.5f)).start();
+        int h = Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
+        float dim = (h >= 22 || h < 7) ? 0.55f : (h >= 19 ? 0.35f : 0.15f);
+        dimView.animate().alpha(dim).setDuration(1500).start();
+    }
+
+    private boolean forceIdle = false;
+
+    private void startIdleNow() {
+        forceIdle = true;
+        handler.removeCallbacks(idleRun);
+        handler.postDelayed(idleRun, 600);
+    }
+
+    private void exitIdle(boolean animate) {
+        if (!idle) return;
+        idle = false;
+        long d = animate ? 350 : 0;
+        for (View v : new View[]{rightCol, recRow, favLabel, favBox, foldersBox, edgeTab}) {
+            if (v != null) {
+                v.animate().cancel();
+                v.animate().alpha(1f).setDuration(d).start();
+            }
+        }
+        clockCol.animate().cancel();
+        clockCol.animate().translationX(0).translationY(0).scaleX(1f).scaleY(1f).setDuration(d).start();
+        dimView.animate().cancel();
+        dimView.animate().alpha(0f).setDuration(d).start();
+        scheduleIdle();
+    }
+
+    private String idleLabel() {
+        return idleMin <= 0 ? "Spenta" : "Dopo " + idleMin + (idleMin == 1 ? " minuto" : " minuti");
     }
 
     // ------------------------------------------------------------------ continua a guardare
@@ -1990,6 +2303,58 @@ public class MainActivity extends Activity {
         drawerRow(i++, "🌤️", "Città del meteo", city != null ? city : "Non impostata", () -> {
             closeDrawerNow();
             askCity();
+        });
+
+        // ingressi: un OK e il TV passa a quella sorgente
+        List<AppItem> ins = new ArrayList<>();
+        for (AppItem a : apps.values()) if (Inputs.isInput(a.pkg)) ins.add(a);
+        Collections.sort(ins, (x, y) -> x.label.toString().compareToIgnoreCase(y.label.toString()));
+        if (!ins.isEmpty()) {
+            drawerSection("Sorgenti");
+            for (final AppItem a : ins) {
+                drawerRow(i++, "🔌", a.label.toString(),
+                        favs.contains(a.pkg) ? "Nei preferiti · tieni premuto OK per toglierlo"
+                                : "Tieni premuto OK per metterlo nei preferiti", () -> {
+                            closeDrawerNow();
+                            launch(a);
+                        });
+                final View row = drawerList.getChildAt(drawerList.getChildCount() - 1);
+                final int idx = i - 1;
+                row.setOnLongClickListener(v -> {
+                    toggleFav(a.pkg);
+                    buildRecents();
+                    buildDrawer(idx);
+                    return true;
+                });
+            }
+        }
+
+        drawerSection("Home");
+        final int recIdx = i;
+        drawerRow(i++, "🕘", "Fila Recenti", recOn ? "Attiva" : "Spenta", () -> {
+            recOn = !recOn;
+            prefs.edit().putBoolean("rec_on", recOn).apply();
+            buildRecents();
+            buildDrawer(recIdx);
+        });
+        final int idleIdx = i;
+        drawerRow(i++, "🖼️", "Modalità quadro", idleLabel(), () -> {
+            int[] steps = {2, 5, 10, 30, 0};
+            int next = steps[0];
+            for (int k = 0; k < steps.length; k++) {
+                if (steps[k] == idleMin) {
+                    next = steps[(k + 1) % steps.length];
+                    break;
+                }
+            }
+            idleMin = next;
+            prefs.edit().putInt("idle_min", idleMin).apply();
+            scheduleIdle();
+            buildDrawer(idleIdx);
+        });
+        drawerRow(i++, "✨", "Prova la modalità quadro adesso", "Premi un tasto qualsiasi per tornare", () -> {
+            closeDrawerNow();
+            startIdleNow();
         });
 
         drawerSection("Continua a guardare");

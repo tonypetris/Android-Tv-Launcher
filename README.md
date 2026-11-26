@@ -10,6 +10,11 @@ Spegni e Riavvia. In alto a destra la fila **Continua a guardare** riprende film
 - **OK tenuto premuto** (o tasto **Menu**): sposta all'inizio / a sinistra / a destra, nascondi, info app
 - **App nascoste** (in alto): rimette in griglia un'app nascosta
 - **Home**: torna alla prima app
+- **Sorgenti HDMI**: gli ingressi del TV compaiono come app (la prima volta nella cartella Visione TV).
+  Mettili nei Preferiti per passare a una console o a un decoder con un solo OK; sono anche nel menu laterale.
+- **Recenti**: sopra i Preferiti le ultime app aperte (tranne quelle già nei Preferiti).
+- **Modalità quadro**: dopo qualche minuto senza tasti restano solo paesaggio e orologio, più scuri la sera.
+  Un tasto qualsiasi riporta tutto. Il tempo (2, 5, 10, 30 minuti o spenta) si sceglie dal menu laterale.
 - **Freccia ‹ sul bordo destro** (ci arrivi con →) o pulsante **⚙️**: apre il menu laterale, che scorre da destra.
   Dentro: impostazioni del TV, suoni, città del meteo e la fila Continua a guardare, con un interruttore per ogni app.
   Si chiude con Indietro o ←.
