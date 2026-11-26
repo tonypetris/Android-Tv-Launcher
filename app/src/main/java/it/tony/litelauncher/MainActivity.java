@@ -1936,7 +1936,8 @@ public class MainActivity extends Activity {
 
     private void scheduleIdle() {
         handler.removeCallbacks(idleRun);
-        if (idleMin > 0) handler.postDelayed(idleRun, idleMin * 60_000L);
+        if (forceIdle) handler.postDelayed(idleRun, 700);       // "prova adesso" non va annullato
+        else if (idleMin > 0) handler.postDelayed(idleRun, idleMin * 60_000L);
     }
 
     private void enterIdle() {
@@ -1945,10 +1946,11 @@ public class MainActivity extends Activity {
         if (!hasWindowFocus() || drawerOpen || openIdx >= 0) {
             android.util.Log.i("LiteLauncher", "quadro rimandato: focus=" + hasWindowFocus()
                     + " menu=" + drawerOpen + " cartella=" + openIdx);
-            forceIdle = false;
+            if (forceIdle && ++forceTries > 10) forceIdle = false;
             scheduleIdle();
             return;
         }
+        forceTries = 0;
         android.util.Log.i("LiteLauncher", "quadro: entro");
         forceIdle = false;
         idle = true;
@@ -1973,11 +1975,12 @@ public class MainActivity extends Activity {
     }
 
     private boolean forceIdle = false;
+    private int forceTries = 0;
 
     private void startIdleNow() {
         forceIdle = true;
-        handler.removeCallbacks(idleRun);
-        handler.postDelayed(idleRun, 700);
+        forceTries = 0;
+        scheduleIdle();
     }
 
     private void exitIdle(boolean animate) {
